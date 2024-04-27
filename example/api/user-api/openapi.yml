@@ -1,0 +1,210 @@
+openapi: 3.1.0
+info:
+    version: 1.0.0
+    title: Swagger Petstore - OpenAPI 3.1
+    summary: User API
+    description: |-
+        This is a sample Pet Store Server based on the OpenAPI 3.1 specification.  You can find out more about
+        Swagger at [https://swagger.io](https://swagger.io). In the third iteration of the pet store, we've switched to
+        the design first approach! You can now help us improve the API whether it's by making changes to the definition
+        itself or to the code. That way, with time, we can improve the API in general, and expose some of the new
+        features in OAS3.
+    termsOfService: http://swagger.io/terms/
+    contract:
+        name: User API
+        email: apiteam@swagger.io
+    license:
+        name: Apache 2.0
+        url: http://www.apache.org/licenses/LICENSE-2.0.html
+servers:
+    - url: http://petstore.swagger.io/api
+paths:
+    /api/v1/user/{user_id}:
+        get:
+            description: Returns a `User` object with the given `id`.
+            parameters:
+                - name: user_id
+                  in: path
+                  description: UserID
+                  required: true
+                  schema:
+                    type: integer
+                    format: int32
+                  examples:
+                    A user not found:
+                        summary: A user not found
+                        value: 2
+                    An internal error:
+                        summary: An internal error
+                        value: 2
+                    OK:
+                        summary: OK
+                        value: 1
+            responses:
+                200:
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    id:
+                                        type: integer
+                                        format: int32
+                                    name:
+                                        type: string
+                                additionalProperties: false
+                                required:
+                                    - id
+                                    - name
+                                examples:
+                                    - id: 1
+                                      name: John
+                404:
+                    description: A user not found
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: integer
+                                        format: int32
+                                    details:
+                                        type: string
+                                    errorCode:
+                                        type: string
+                                    message:
+                                        type: string
+                                additionalProperties: false
+                                required:
+                                    - code
+                                    - message
+                                    - errorCode
+                                    - details
+                                examples:
+                                    - code: 404
+                                      message: User not found
+                                      errorcode: user_not_found
+                                      details: User with id %s not found
+                500:
+                    description: An internal error
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: integer
+                                        format: int32
+                                    details:
+                                        type: string
+                                    errorCode:
+                                        type: string
+                                    message:
+                                        type: string
+                                additionalProperties: false
+                                required:
+                                    - code
+                                    - message
+                                    - errorCode
+                                    - details
+                                examples:
+                                    - code: 500
+                                      message: Internal error
+                                      errorcode: internal_error
+                                      details: Internal error
+    /api/v1/users:
+        get:
+            description: Returns a `User` object with the given `id`.
+            parameters:
+                - name: offset
+                  in: query
+                  description: Offset
+                  required: false
+                  schema:
+                    type: integer
+                    format: int32
+                    default: "0"
+                  examples:
+                    DefaultValues:
+                        summary: DefaultValues
+                        value: 0
+                - name: offset
+                  in: query
+                  description: Offset
+                  required: false
+                  schema:
+                    type: integer
+                    format: int32
+                    default: "0"
+                  examples:
+                    OK:
+                        summary: OK
+                        value: 2
+                - name: limit
+                  in: query
+                  description: Limit
+                  required: false
+                  schema:
+                    type: integer
+                    format: int32
+                    default: "10"
+                  examples:
+                    DefaultValues:
+                        summary: DefaultValues
+                        value: 10
+                - name: limit
+                  in: query
+                  description: Limit
+                  required: false
+                  schema:
+                    type: integer
+                    format: int32
+                    default: "10"
+                  examples:
+                    OK:
+                        summary: OK
+                        value: 10
+            responses:
+                200:
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    limit:
+                                        type: integer
+                                        format: int32
+                                    offset:
+                                        type: integer
+                                        format: int32
+                                    users:
+                                        type: array
+                                        items:
+                                            type: object
+                                            properties:
+                                                id:
+                                                    type: integer
+                                                    format: int32
+                                                name:
+                                                    type: string
+                                            additionalProperties: false
+                                            required:
+                                                - id
+                                                - name
+                                additionalProperties: false
+                                required:
+                                    - offset
+                                    - limit
+                                    - users
+                                examples:
+                                    - offset: 2
+                                      limit: 10
+                                      users:
+                                        - id: 1
+                                          name: John
+externalDocs:
+    description: Find out more about Swagger
+    url: http://swagger.io

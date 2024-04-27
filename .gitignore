@@ -1,0 +1,10 @@
+# Visual Studio Code
+.vscode/
+.history/
+.idea/
+
+.DS_Store
+
+# go
+bin/
+pkg/

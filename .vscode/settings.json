@@ -1,0 +1,35 @@
+{
+    "cSpell.words": [
+        "containedctx",
+        "exhaustruct",
+        "geruz",
+        "goccy",
+        "nolint",
+        "openapi",
+        "rabbitmq",
+        "rizotto",
+        "samber",
+        "shoenig",
+        "shopspring",
+        "stretchr",
+        "testutils",
+        "tmpl"
+    ],
+    "[go]": {
+        "editor.formatOnSave": true,
+        "editor.defaultFormatter": "golang.go"
+    },
+    "go.formatTool": "custom",
+    "go.alternateTools": {
+        "customFormatter": "golangci-lint-v2"
+    },
+    "go.formatFlags": [
+        "fmt",
+        "--stdin"
+    ],
+    "go.lintTool": "golangci-lint-v2",
+    "go.lintOnSave": "package",
+    "go.lintFlags": [
+        "--fast-only"
+    ]
+}

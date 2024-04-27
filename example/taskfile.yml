@@ -1,0 +1,8 @@
+version: "3"
+
+tasks:
+  test:
+    cmds:
+      - go test ./... -coverprofile=out/cover.out
+      - go tool cover -func ./out/cover.out
+    silent: true
