@@ -1,5 +1,10 @@
 version: "3"
 
+includes:
+  example:
+    taskfile: ./example/taskfile.yml
+    dir: ./example
+
 tasks:
   lint:
     desc: Run golangci-lint against the whole module
