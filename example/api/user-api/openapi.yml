@@ -130,15 +130,6 @@ paths:
                     DefaultValues:
                         summary: DefaultValues
                         value: 0
-                - name: offset
-                  in: query
-                  description: Offset
-                  required: false
-                  schema:
-                    type: integer
-                    format: int32
-                    default: "0"
-                  examples:
                     OK:
                         summary: OK
                         value: 2
@@ -154,15 +145,6 @@ paths:
                     DefaultValues:
                         summary: DefaultValues
                         value: 10
-                - name: limit
-                  in: query
-                  description: Limit
-                  required: false
-                  schema:
-                    type: integer
-                    format: int32
-                    default: "10"
-                  examples:
                     OK:
                         summary: OK
                         value: 10

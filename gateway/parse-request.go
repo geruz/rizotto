@@ -1,4 +1,4 @@
-package rizotto
+package gateway
 
 import (
 	"encoding/json"

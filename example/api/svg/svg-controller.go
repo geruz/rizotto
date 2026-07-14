@@ -8,6 +8,7 @@ import (
 	"github.com/geruz/rizotto/content"
 	tr "github.com/geruz/rizotto/example/services/templates"
 	"github.com/geruz/rizotto/example/services/templates/templates-client"
+	"github.com/geruz/rizotto/gateway"
 	"github.com/geruz/rizotto/logger"
 )
 
@@ -20,13 +21,17 @@ type SVGController struct {
 	}
 }
 
+func noAuth(ctx gateway.HTTPContext) gateway.HTTPContext {
+	return ctx
+}
+
 func NewSVGController() SVGController {
 	ctrl := SVGController{
 		Controller: rizotto.Controller{},
 		tmplSrv:    tr.BindService(),
 	}
 	ctrl.AddRoutes(
-		rizotto.Content("GET /svg/{user}/{template}/{key}", rizotto.NoAuth, ctrl.renderSVG),
+		gateway.Content("GET /svg/{user}/{template}/{key}", noAuth, ctrl.renderSVG),
 	)
 
 	return ctrl
@@ -39,8 +44,8 @@ type RenderTemplateRequest struct {
 }
 
 func (ctrl SVGController) renderSVG(
-	ctx rizotto.HTTPContext, req RenderTemplateRequest,
-) (SVGTemplate, rizotto.HTTPError) {
+	ctx gateway.HTTPContext, req RenderTemplateRequest,
+) (SVGTemplate, gateway.HTTPError) {
 	const exampleId = 12
 	tmpl, model, err := async.Parallel2(
 
@@ -53,14 +58,14 @@ func (ctrl SVGController) renderSVG(
 	if err != nil {
 		logger.Error(ctx, "Failed to parse template", err)
 
-		return SVGTemplate{SVGContentType: content.SVGContentType{}, Template: content.Template{}}, rizotto.NewInternalError()
+		return SVGTemplate{SVGContentType: content.SVGContentType{}, Template: content.Template{}}, gateway.NewInternalError()
 	}
 
 	tmp2, err := template.New("svg").Parse(tmpl.Template)
 	if err != nil {
 		logger.Error(ctx, "Failed to render template", err)
 
-		return SVGTemplate{SVGContentType: content.SVGContentType{}, Template: content.Template{}}, rizotto.NewInternalError()
+		return SVGTemplate{SVGContentType: content.SVGContentType{}, Template: content.Template{}}, gateway.NewInternalError()
 	}
 
 	return SVGTemplate{

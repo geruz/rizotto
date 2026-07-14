@@ -1,8 +1,7 @@
-package rizotto
+package gateway
 
 import (
 	"errors"
-	"net/http"
 	"reflect"
 
 	"github.com/go-playground/validator/v10"
@@ -62,47 +61,6 @@ func ValidateDecimalGreatOrEq(fl validator.FieldLevel) bool {
 }
 
 }*/
-
-type ValidationRecord struct {
-	ErrorCode ErrorCode `json:"errorCode"`
-	FieldName string    `json:"fieldName"`
-	Message   string    `json:"message"`
-	Details   string    `json:"details"`
-}
-type CrossError struct {
-	ErrorCode ErrorCode `json:"errorCode"`
-	Message   string    `json:"message"`
-	Details   string    `json:"details"`
-}
-type ValidationError struct {
-	FieldErrors []ValidationRecord `json:"fieldErrors"`
-	CrossErrors []CrossError       `json:"crossErrors"`
-}
-
-func NewValidationError() ValidationError {
-	return ValidationError{
-		FieldErrors: nil,
-		CrossErrors: nil,
-	}
-}
-
-func (e *ValidationError) AddFieldError(fieldName, message string) {
-	e.FieldErrors = append(e.FieldErrors, ValidationRecord{
-		ErrorCode: "",
-		FieldName: fieldName,
-		Message:   message,
-		Details:   "",
-	})
-	e.CrossErrors = nil
-}
-
-func (e ValidationError) ErrorObj() any {
-	return e
-}
-
-func (e ValidationError) StatusCode() int {
-	return http.StatusBadRequest
-}
 
 func validateRequestObject[TRequest any](reqParams TRequest) HTTPError {
 	err := validate.Struct(reqParams)

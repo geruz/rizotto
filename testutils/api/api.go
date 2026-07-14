@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/geruz/rizotto"
 	"github.com/geruz/rizotto/documentation/openapi"
+	"github.com/geruz/rizotto/gateway"
 	"github.com/shoenig/test/must"
 )
 
@@ -23,7 +23,7 @@ type GroupRouteTestRunner[Controller controller] struct {
 }
 
 type controller interface {
-	RouteTable() rizotto.RouteTable
+	RouteTable() gateway.RouteTable
 }
 
 func GroupRouteTests[Controller controller](
@@ -44,7 +44,7 @@ func GroupRouteTests[Controller controller](
 type CallInfo[Request any, Response any] struct {
 	request        Request
 	actualResponse Response
-	actualError    rizotto.HTTPError
+	actualError    gateway.HTTPError
 	//	result         Result[Response]
 	response *http.Response
 	body     []byte
@@ -99,7 +99,7 @@ func (c CallInfo[TRequest, TResponse]) ExpectedAnswer(t *testing.T, code int, da
 
 func (c CallInfo[TRequest, TResponse]) ExpectedError(
 	t *testing.T,
-	expected rizotto.HTTPError,
+	expected gateway.HTTPError,
 ) CallInfo[TRequest, TResponse] {
 	t.Helper()
 	c.ExpectedBody(t, expected.StatusCode(), expected)
@@ -149,13 +149,13 @@ func (c CallInfo[TRequest, TResponse]) ExpectedSuccess(t *testing.T, code int, e
 }
 
 type ConfigurableRoute[TContext any, TRequest any, TResult any] interface {
-	ConfigureControllerMethod(m func(TContext, TRequest) (TResult, rizotto.HTTPError)) rizotto.Route
+	ConfigureControllerMethod(m func(TContext, TRequest) (TResult, gateway.HTTPError)) gateway.Route
 }
 
 func TestAPICall[Controller controller, Context any, Request any, Response any](
 	t *testing.T,
 	ctr Controller,
-	f func(Context, Request) (Response, rizotto.HTTPError),
+	f func(Context, Request) (Response, gateway.HTTPError),
 	cfg RequestConfiguration,
 ) CallInfo[Request, Response] {
 	// ctr := h.Constructor()
@@ -169,11 +169,11 @@ func TestAPICall[Controller controller, Context any, Request any, Response any](
 	var (
 		actualRequestObj  Request
 		actualResponseObj Response
-		actualError       rizotto.HTTPError
+		actualError       gateway.HTTPError
 	)
 
 	if a, ok := r.(ConfigurableRoute[Context, Request, Response]); ok {
-		r = a.ConfigureControllerMethod(func(ctx Context, req Request) (Response, rizotto.HTTPError) {
+		r = a.ConfigureControllerMethod(func(ctx Context, req Request) (Response, gateway.HTTPError) {
 			actualRequestObj = req
 			resp, httpError := f(ctx, req)
 			actualError = httpError
@@ -182,7 +182,7 @@ func TestAPICall[Controller controller, Context any, Request any, Response any](
 			return resp, httpError
 		})
 	} else {
-		var f func(Context, Request) (Response, rizotto.HTTPError)
+		var f func(Context, Request) (Response, gateway.HTTPError)
 
 		t.Fatal("Route is not configurable for ", reflect.TypeOf(f).String(),
 			". Maybe wrong controller method signature.",

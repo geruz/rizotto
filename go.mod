@@ -5,6 +5,8 @@ go 1.22.1
 require (
 	github.com/danielgtaylor/huma v1.14.2
 	github.com/ggicci/httpin v0.18.1
+	github.com/prometheus/client_golang v1.19.1
+	github.com/samber/lo v1.53.0
 )
 
 require (
@@ -14,11 +16,9 @@ require (
 	github.com/go-playground/locales v0.14.1 // indirect
 	github.com/go-playground/universal-translator v0.18.1 // indirect
 	github.com/leodido/go-urn v1.4.0 // indirect
-	github.com/prometheus/client_golang v1.19.1 // indirect
 	github.com/prometheus/client_model v0.5.0 // indirect
 	github.com/prometheus/common v0.48.0 // indirect
 	github.com/prometheus/procfs v0.12.0 // indirect
-	github.com/samber/lo v1.53.0 // indirect
 	google.golang.org/protobuf v1.33.0 // indirect
 )
 

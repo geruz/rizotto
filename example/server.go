@@ -6,6 +6,7 @@ import (
 	"github.com/geruz/rizotto"
 	"github.com/geruz/rizotto/example/api/svg"
 	api "github.com/geruz/rizotto/example/api/user-api"
+	"github.com/geruz/rizotto/gateway"
 	"github.com/geruz/rizotto/settings/env"
 )
 
@@ -14,14 +15,13 @@ func main() {
 	rizotto.MustInitEnv(ctx)
 	rizotto.MustInitLogger(ctx)
 
-	rizotto.InitMetrics(ctx, ":8081")
+	rizotto.InitMetrics(ctx, ":"+env.GetStringValue("METRICS_PORT", "9091"))
 	// rizotto.InitTracer(ctx)
 	// rizotto.InitScheduler(ctx)
-	// MustBindServices(ctx)
-	gateway := rizotto.NewHTTPGateway()
+	gt := gateway.NewHTTPGateway()
 
-	err := gateway.Routing(
-		rizotto.JoinRouteTables(
+	err := gt.Routing(
+		gateway.JoinRouteTables(
 			api.NewUserController().RouteTable(),
 			svg.NewSVGController().RouteTable(),
 		),
