@@ -153,10 +153,10 @@ type (
 	Method        string
 	Documentation struct {
 		OpenAPI      string           `json:"openapi"                yaml:"openapi"`
-		Info         Info             `json:"info,omitempty"         yaml:"info,omitempty"`
+		Info         Info             `json:"info"                   yaml:"info"`
 		Servers      []ServerInfo     `json:"servers,omitempty"      yaml:"servers,omitempty"`
 		Paths        map[string]*Path `json:"paths,omitempty"        yaml:"paths,omitempty"`
-		Security     Security         `json:"security,omitempty"     yaml:"security,omitempty"`
+		Security     Security         `json:"security"               yaml:"security"`
 		Tags         []Tag            `json:"tags,omitempty"         yaml:"tags,omitempty"`
 		ExternalDocs *ExternalDocs    `json:"externalDocs,omitempty" yaml:"externalDocs,omitempty"`
 

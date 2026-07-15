@@ -6,6 +6,7 @@ import (
 	"net/url"
 
 	"github.com/geruz/rizotto/logger"
+	"github.com/geruz/rizotto/metrics"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
@@ -39,16 +40,10 @@ var requestsCountTotal = prometheus.NewCounterVec(
 	[]string{"uri"},
 )
 
-var requestDuration = prometheus.NewSummaryVec(
-	prometheus.SummaryOpts{ //nolint:exhaustruct
-		Name: "service_requests_durations_seconds",
-		Help: "Service requests durations in seconds.",
-		Objectives: map[float64]float64{
-			0.5:  0.05,  //nolint:mnd
-			0.9:  0.01,  //nolint:mnd
-			0.99: 0.001, //nolint:mnd
-		},
-	},
+var requestDuration = metrics.SummaryVec(
+	"service_requests_durations_seconds",
+	"Service requests durations in seconds.",
+	metrics.Percentiles_60_90_99,
 	[]string{"uri"},
 )
 
