@@ -16,17 +16,15 @@ import (
 	"github.com/goccy/go-json"
 )
 
-var errInvalidRequest = errors.New("invalid request")
-
-func makeHTTPHandler[TRequest any, TAnswer any, TError error](
+func makeHTTPHandler[TRequest any, TAnswer any, TError ServiceError](
 	uri string,
-	handler func(context.Context, TRequest) (*TAnswer, TError),
-) func(ctx context.Context, i any) (any, error) {
+	handler func(context.Context, TRequest) (TAnswer, TError),
+) func(ctx context.Context, i any) (any, ServiceError) {
 	logParams := logger.KV("uri", uri) + " " + logger.KV("transport", "http")
 
 	reqType := reflect.TypeFor[*TRequest]()
 
-	return func(ctx context.Context, req any) (any, error) {
+	return func(ctx context.Context, req any) (any, ServiceError) {
 		// ctx, span := trace.Span(ctx, uri)
 		// span.SetAttributes(trace.String("uri", uri))
 		// defer span.End()
@@ -38,8 +36,19 @@ func makeHTTPHandler[TRequest any, TAnswer any, TError error](
 			logger.Trace(ctx, "Call service", logParams, logger.KVi("duration", duration.Milliseconds()))
 		}(time.Now())
 
-		request, ok := req.(*TRequest)
+		requestPtr, ok := req.(*TRequest)
 
+		if !ok {
+			logger.Error(
+				ctx,
+				"Failed to cast request ",
+				nil,
+				reflect.TypeOf(req).Name()+"->"+reqType.String(),
+				logger.KVj("request", req),
+			)
+
+			return nil, NewInvalidRequestError("invalid request type: " + reflect.TypeOf(req).Name() + "->" + reqType.String())
+		}
 		validateError := validators.ValidateHTTPRequest(ctx, req)
 		if validateError != nil {
 			jsonData, err := json.Marshal(validateError)
@@ -52,13 +61,7 @@ func makeHTTPHandler[TRequest any, TAnswer any, TError error](
 			return nil, NewValidationError("validation_error", string(jsonData))
 		}
 
-		if !ok {
-			logger.Error(ctx, "Failed to cast request ", nil, reflect.TypeOf(req).Name()+"->"+reqType.String())
-
-			return nil, errInvalidRequest
-		}
-
-		return handler(ctx, *request)
+		return handler(ctx, *requestPtr)
 	}
 }
 

@@ -45,6 +45,26 @@ func (e *NotImplementedError) Error() string {
 	return e.PrivateDetails
 }
 
+type WrongContractError struct {
+	baseError
+
+	PrivateDetails string `json:"privateDetails"`
+}
+
+func NewWrongContractError(service string, method string) *WrongContractError {
+	return &WrongContractError{
+		baseError: baseError{
+			StatusCode: http.StatusBadRequest,
+			ErrorCode:  "wrong_contract",
+		},
+		PrivateDetails: "method " + method + " has wrong contract",
+	}
+}
+
+func (e *WrongContractError) Error() string {
+	return e.PrivateDetails
+}
+
 type NotFoundError struct {
 	baseError
 
@@ -137,11 +157,13 @@ type ValidationError struct {
 	PublicMessage   *string `json:"publicMessage,omitempty"`
 }
 
+var ValidationErrorCode = "validation_error"
+
 func NewValidationError[TCode ~string](publicErrorCode TCode, message string) *ValidationError {
 	return &ValidationError{
 		baseError: baseError{
 			StatusCode: http.StatusBadRequest,
-			ErrorCode:  "validation_error",
+			ErrorCode:  ValidationErrorCode,
 		},
 		PrivateDetails:  message,
 		PublicErrorCode: string(publicErrorCode),
@@ -149,6 +171,17 @@ func NewValidationError[TCode ~string](publicErrorCode TCode, message string) *V
 	}
 }
 
+func NewInvalidRequestError(message string) *ValidationError {
+	return &ValidationError{
+		baseError: baseError{
+			StatusCode: http.StatusBadRequest,
+			ErrorCode:  "validation_error",
+		},
+		PrivateDetails:  message,
+		PublicErrorCode: "invalid_request",
+		PublicMessage:   nil,
+	}
+}
 func NewPublicValidationError(privateDetails string, publicDetails string) *ValidationError {
 	return &ValidationError{
 		baseError: baseError{

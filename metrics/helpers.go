@@ -16,7 +16,7 @@ func SummaryVec(
 	objectives map[float64]float64,
 	labels []string,
 ) *prometheus.SummaryVec {
-	return prometheus.NewSummaryVec(
+	vec := prometheus.NewSummaryVec(
 		prometheus.SummaryOpts{ //nolint:exhaustruct
 			Name:       name,
 			Help:       help,
@@ -24,4 +24,24 @@ func SummaryVec(
 		},
 		labels,
 	)
+	prometheus.MustRegister(vec)
+
+	return vec
+}
+
+func CounterVec(
+	name string,
+	help string,
+	labels []string,
+) *prometheus.CounterVec {
+	vec := prometheus.NewCounterVec(
+		prometheus.CounterOpts{ //nolint:exhaustruct
+			Name: name,
+			Help: help,
+		},
+		labels,
+	)
+	prometheus.MustRegister(vec)
+
+	return vec
 }

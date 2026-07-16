@@ -7,17 +7,16 @@ import (
 
 	"github.com/geruz/rizotto/logger"
 	"github.com/geruz/rizotto/metrics"
-	"github.com/prometheus/client_golang/prometheus"
 )
 
 const (
-	rabbitProtocol string = "rabbitmq"
-	httpProtocol   string = "http"
+	natsProtocol string = "nats"
+	httpProtocol string = "http"
 )
 
 type handlerRPCParams struct {
 	newRequest func() any
-	handler    func(context.Context, any) (any, error)
+	handler    func(context.Context, any) (any, ServiceError)
 }
 type handlerEventParams struct {
 	newRequest func() any
@@ -29,14 +28,9 @@ var (
 	events    = map[string]handlerEventParams{}
 )
 
-var requestsCountTotal = prometheus.NewCounterVec(
-	prometheus.CounterOpts{
-		Namespace:   "",
-		Subsystem:   "",
-		Name:        "service_requests_total",
-		Help:        "Current service requests count.",
-		ConstLabels: nil,
-	},
+var requestsCountTotal = metrics.CounterVec(
+	"service_requests_total",
+	"Current service requests count.",
 	[]string{"uri"},
 )
 
@@ -47,11 +41,6 @@ var requestDuration = metrics.SummaryVec(
 	[]string{"uri"},
 )
 
-func init() {
-	prometheus.MustRegister(requestsCountTotal)
-	prometheus.MustRegister(requestDuration)
-}
-
 func mustGetScheme(uri string) string {
 	u, err := url.Parse(uri)
 	if err != nil {
@@ -61,9 +50,7 @@ func mustGetScheme(uri string) string {
 	return u.Scheme
 }
 
-var errWrongAnswerType = errors.New("wrong answer type")
-
-func classifyRPCError(ctx context.Context, uri, service, method string, err error) error {
+func classifyRPCError(ctx context.Context, uri, service, method string, err ServiceError) ServiceError {
 	var (
 		notFound          *NotFoundError
 		validationErr     *ValidationError
@@ -91,7 +78,13 @@ func classifyRPCError(ctx context.Context, uri, service, method string, err erro
 	return err
 }
 
-func MustBind[T_RPC ~func(context.Context, TRequest) (*TAnswer, error), TRequest any, TAnswer any](uri string) T_RPC {
+func MustBind[
+	T_RPC ~func(context.Context, TRequest) (TAnswer, ServiceError),
+	TRequest any,
+	TAnswer any,
+](
+	uri string,
+) T_RPC {
 	parts, err := url.Parse(uri)
 	if err != nil {
 		panic(err)
@@ -100,36 +93,41 @@ func MustBind[T_RPC ~func(context.Context, TRequest) (*TAnswer, error), TRequest
 	service := parts.Host
 	method := parts.Path
 
-	return T_RPC(func(ctx context.Context, req TRequest) (*TAnswer, error) {
+	return T_RPC(func(ctx context.Context, req TRequest) (TAnswer, ServiceError) {
 		params, ok := callbacks[uri]
 		if !ok {
 			logger.Error(ctx, "method not registered", nil, logger.KV("uri", uri))
+			var answer TAnswer
 
-			return nil, NewNotImplementedError(service, method)
+			return answer, NewNotImplementedError(service, method)
 		}
 
 		res, err := params.handler(ctx, &req)
 		if err != nil {
-			return nil, classifyRPCError(ctx, uri, service, method, err)
+			var answer TAnswer
+
+			return answer, classifyRPCError(ctx, uri, service, method, err)
 		}
 
-		answer, ok := res.(*TAnswer)
+		answer, ok := res.(TAnswer)
 		if !ok {
-			return nil, errWrongAnswerType
+			var answer TAnswer
+
+			return answer, NewWrongContractError(service, method)
 		}
 
 		return answer, nil
 	})
 }
 
-func MustRegister[TRequest any, TAnswer any, TError error](
+func MustRegister[TRequest any, TAnswer any, TError ServiceError](
 	uri string,
-	handler func(context.Context, TRequest) (*TAnswer, TError),
+	handler func(context.Context, TRequest) (TAnswer, TError),
 ) {
 	scheme := mustGetScheme(uri)
 	switch scheme {
-	case rabbitProtocol:
-		panic("rabbitmq not implemented for RPC")
+	case natsProtocol:
+		panic("nats not implemented for RPC")
 	case httpProtocol:
 		callbacks[uri] = handlerRPCParams{
 			newRequest: func() any { return new(TRequest) },
@@ -150,8 +148,6 @@ func newHandlerEventParams[TRequest any](handler func(context.Context, any) bool
 func MustRegisterEvent[TRequest any](uri string, handler func(context.Context, TRequest) bool) {
 	scheme := mustGetScheme(uri)
 	switch scheme {
-	// case rabbitProtocol:
-	//	events[uri] = newHandlerEventParams[TRequest](makeRabbitEventHandler(uri, handler))
 	case httpProtocol:
 		events[uri] = newHandlerEventParams[TRequest](makeHTTPEventHandler(handler))
 	default:

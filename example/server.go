@@ -6,6 +6,8 @@ import (
 	"github.com/geruz/rizotto"
 	"github.com/geruz/rizotto/example/api/svg"
 	api "github.com/geruz/rizotto/example/api/user-api"
+	usersrv "github.com/geruz/rizotto/example/services/user"
+	"github.com/geruz/rizotto/example/services/user/user-client"
 	"github.com/geruz/rizotto/gateway"
 	"github.com/geruz/rizotto/settings/env"
 )
@@ -20,6 +22,9 @@ func main() {
 	// rizotto.InitScheduler(ctx)
 	gt := gateway.NewHTTPGateway()
 
+	user.RegisterServer(
+		usersrv.NewUserService(),
+	)
 	err := gt.Routing(
 		gateway.JoinRouteTables(
 			api.NewUserController().RouteTable(),

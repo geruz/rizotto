@@ -18,7 +18,7 @@ type (
 )
 
 func NewUserController() UserController {
-	userClient := user.MustBind()
+	userClient := user.BindClient()
 	ctrl := UserController{
 		Controller:     rizotto.Controller{},
 		getUserRPC:     userClient.GetUserRPC,

@@ -25,42 +25,12 @@ type UserList struct {
 
 	Users []User
 }
-type (
-	GetUserRPC          func(ctx context.Context, req GetUserRequest) (User, bb.ServiceError)
-	SelectUsersRPC      func(ctx context.Context, req SelectUserRequest) (UserList, bb.ServiceError)
-	UserServiceContract interface {
-		GetUserRPC(ctx context.Context, req GetUserRequest) (User, bb.ServiceError)
-		SelectUsersRPC(ctx context.Context, req SelectUserRequest) (UserList, bb.ServiceError)
-	}
-)
 
-type userClient struct {
-	_getUserRPC     GetUserRPC
-	_selectUsersRPC SelectUsersRPC
-}
+//go:generate genbind --client=UserService
+type UserService interface {
+	// bind-method: http://user-service/user/get
+	GetUserRPC(ctx context.Context, req GetUserRequest) (User, bb.ServiceError)
 
-func (c userClient) GetUserRPC(ctx context.Context, req GetUserRequest) (User, bb.ServiceError) {
-	return c._getUserRPC(ctx, req)
-}
-
-func (c userClient) SelectUsersRPC(ctx context.Context, req SelectUserRequest) (UserList, bb.ServiceError) {
-	return c._selectUsersRPC(ctx, req)
-}
-
-func MustBind() UserServiceContract {
-	return userClient{
-		_getUserRPC: func(ctx context.Context, req GetUserRequest) (User, bb.ServiceError) {
-			return User{
-				ID:   req.UserID,
-				Name: "John",
-			}, nil
-		},
-		_selectUsersRPC: func(ctx context.Context, req SelectUserRequest) (UserList, bb.ServiceError) {
-			return UserList{
-				Offset: req.Offset,
-				Limit:  req.Limit,
-				Users:  []User{{ID: 1, Name: "John"}},
-			}, nil
-		},
-	}
+	// bind-method: http://user-service/user/select
+	SelectUsersRPC(ctx context.Context, req SelectUserRequest) (UserList, bb.ServiceError)
 }
