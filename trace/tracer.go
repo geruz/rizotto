@@ -28,8 +28,11 @@ func DisableTracing(ctx context.Context) (context.Context, otel_trace.Span) {
 	)), span
 }
 
+//nolint:spancheck // caller owns the returned span and is responsible for calling span.End()
 func Span(ctx context.Context, name string, opts ...otel_trace.SpanStartOption) (context.Context, otel_trace.Span) {
-	return tracer.Start(ctx, name, opts...)
+	ctx, span := tracer.Start(ctx, name, opts...)
+
+	return ctx, span
 }
 
 func ServerKind() otel_trace.SpanStartOption {

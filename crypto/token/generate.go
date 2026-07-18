@@ -12,6 +12,8 @@ import (
 
 const charset = "0123456789abcdef"
 
+const hexBytesPerChar = 2
+
 var seededRand *math.Rand = math.New(math.NewSource(time.Now().UnixNano())) //nolint:gosec
 
 func fallback(length int) string {
@@ -24,7 +26,7 @@ func fallback(length int) string {
 }
 
 func cryptoGen(length int) (string, error) {
-	buf := make([]byte, length/2)
+	buf := make([]byte, length/hexBytesPerChar)
 	_, err := crypto.Read(buf)
 	if err == nil {
 		return hex.EncodeToString(buf), nil

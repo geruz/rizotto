@@ -8,12 +8,16 @@ import (
 )
 
 func TestGenerate(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 	token := Generate(ctx, 40)
 	assert.Len(t, token, len("ae3ecf44d9fc5bf66a8825df24c3223b18cde2d8"))
 }
 
 func TestFallback(t *testing.T) {
+	t.Parallel()
+
 	token1 := fallback(40)
 	assert.Len(t, token1, len("ae3ecf44d9fc5bf66a8825df24c3223b18cde2d8"))
 	token2 := fallback(40)
@@ -21,6 +25,8 @@ func TestFallback(t *testing.T) {
 }
 
 func TestCrypto(t *testing.T) {
+	t.Parallel()
+
 	token1, _ := cryptoGen(40)
 	assert.Len(t, token1, len("ae3ecf44d9fc5bf66a8825df24c3223b18cde2d8"))
 	token2, _ := cryptoGen(40)

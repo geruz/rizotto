@@ -18,6 +18,10 @@ type loggingResponseWriter struct {
 
 var ErrNotHijacker = errors.New("writer is not a hijacker")
 
+func NewLoggingResponseWriter(w http.ResponseWriter) *loggingResponseWriter {
+	return &loggingResponseWriter{w, 0}
+}
+
 func (l *loggingResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	if v, ok := l.ResponseWriter.(http.Hijacker); ok {
 		return v.Hijack()
@@ -35,16 +39,14 @@ func (l *loggingResponseWriter) WriteHeader(code int) {
 	l.ResponseWriter.WriteHeader(code)
 }
 
-func NewLoggingResponseWriter(w http.ResponseWriter) *loggingResponseWriter {
-	return &loggingResponseWriter{w, 0}
-}
+const requestIDLength = 32
 
 func TraceMiddleware(spanName string) func(h http.Handler) http.Handler {
 	return func(h http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			requestID := r.Header.Get("X-Request-ID")
 			if requestID == "" {
-				requestID = token.Generate(r.Context(), 32)
+				requestID = token.Generate(r.Context(), requestIDLength)
 			}
 			ctx := logger.WithParams(r.Context(), map[string]string{
 				"requestID": requestID,

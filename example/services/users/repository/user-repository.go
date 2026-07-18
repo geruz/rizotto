@@ -10,6 +10,7 @@ import (
 
 type UserRepository struct {
 	pg.Repository
+
 	queries *db.Queries
 }
 

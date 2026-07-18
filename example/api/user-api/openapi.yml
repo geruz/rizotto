@@ -31,15 +31,23 @@ paths:
                     type: integer
                     format: int32
                   examples:
-                    A user not found:
-                        summary: A user not found
-                        value: 2
                     An internal error:
                         summary: An internal error
                         value: 2
                     OK:
                         summary: OK
                         value: 1
+                - name: user_id
+                  in: path
+                  description: UserID
+                  required: true
+                  schema:
+                    type: integer
+                    format: int32
+                  examples:
+                    A user not found:
+                        summary: A user not found
+                        value: 2
             responses:
                 200:
                     description: OK
@@ -150,7 +158,7 @@ paths:
                         value: 10
             responses:
                 200:
-                    description: OK
+                    description: DefaultValues
                     content:
                         application/json:
                             schema:
@@ -182,11 +190,12 @@ paths:
                                     - limit
                                     - users
                                 examples:
-                                    - offset: 2
+                                    - offset: 0
                                       limit: 10
                                       users:
                                         - id: 1
                                           name: John
+security: {}
 externalDocs:
     description: Find out more about Swagger
     url: http://swagger.io

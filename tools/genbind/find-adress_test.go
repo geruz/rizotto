@@ -2,24 +2,29 @@ package main
 
 import (
 	"go/ast"
+	"go/token"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
+type findBindAddressExpected struct {
+	address             string
+	isEvent             bool
+	isAuthTokenRequired bool
+	tokenScope          string
+}
+
 func TestFindBindAddress(t *testing.T) {
-	type Expected struct {
-		address             string
-		isEvent             bool
-		isAuthTokenRequired bool
-		tokenScope          string
-	}
+	t.Parallel()
 
 	tests := []struct {
 		commentText string
-		expected    Expected
+		expected    findBindAddressExpected
 	}{
 		{
 			commentText: "// bind-method: http://kyc-service/kyc-credentials/get",
-			expected: Expected{
+			expected: findBindAddressExpected{
 				address:             "http://kyc-service/kyc-credentials/get",
 				isEvent:             false,
 				isAuthTokenRequired: false,
@@ -28,7 +33,7 @@ func TestFindBindAddress(t *testing.T) {
 		},
 		{
 			commentText: "// bind-event: rabbitmq://gamification-service/event/register?worker_count=10",
-			expected: Expected{
+			expected: findBindAddressExpected{
 				address:             "rabbitmq://gamification-service/event/register",
 				isEvent:             true,
 				isAuthTokenRequired: false,
@@ -37,7 +42,7 @@ func TestFindBindAddress(t *testing.T) {
 		},
 		{
 			commentText: "// bind-method: http://kyc-service/verification-files/get?auth_token=required",
-			expected: Expected{
+			expected: findBindAddressExpected{
 				address:             "http://kyc-service/verification-files/get",
 				isEvent:             false,
 				isAuthTokenRequired: true,
@@ -46,7 +51,7 @@ func TestFindBindAddress(t *testing.T) {
 		},
 		{
 			commentText: "// bind-method: http://kyc-service/verification-files/get?auth_token=boa",
-			expected: Expected{
+			expected: findBindAddressExpected{
 				address:             "http://kyc-service/verification-files/get",
 				isEvent:             false,
 				isAuthTokenRequired: true,
@@ -56,16 +61,16 @@ func TestFindBindAddress(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		comment := &ast.Comment{
-			Text: test.commentText,
-		}
+		comment := &ast.Comment{Slash: token.NoPos, Text: test.commentText}
 
-		address, isEvent, isAuthTokenRequired, tokenScore := findBindAddress(comment)
+		address, isEvent, isAuthTokenRequired, tokenScope := findBindAddress(comment)
 
-		if address != test.expected.address || isEvent != test.expected.isEvent || isAuthTokenRequired != test.expected.isAuthTokenRequired || tokenScore != test.expected.tokenScope {
-			t.Errorf("findBindAddress(%q) = %q, %t, %t, '%s'; want %q, %t, %t, '%s'",
-				test.commentText, address, isEvent, isAuthTokenRequired, tokenScore,
-				test.expected.address, test.expected.isEvent, test.expected.isAuthTokenRequired, test.expected.tokenScope)
+		actual := findBindAddressExpected{
+			address:             address,
+			isEvent:             isEvent,
+			isAuthTokenRequired: isAuthTokenRequired,
+			tokenScope:          tokenScope,
 		}
+		assert.Equal(t, test.expected, actual, test.commentText)
 	}
 }
