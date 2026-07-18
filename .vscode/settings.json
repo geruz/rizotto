@@ -5,6 +5,8 @@
         "dbmate",
         "dotenv",
         "exhaustruct",
+        "forbidigo",
+        "genbind",
         "geruz",
         "ggicci",
         "goccy",
@@ -36,6 +38,7 @@
         "Taskfile",
         "testutils",
         "tmpl",
+        "unparam",
         "usersrv"
     ],
     "[go]": {

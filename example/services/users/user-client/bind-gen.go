@@ -11,8 +11,7 @@ import (
 	"github.com/geruz/rizotto/bb"
 )
 
-
-func RegisterServer(srv UserService) {
+func RegisterServer(srv UserClient) {
 	bb.MustRegister("http://user-service/user/get", srv.GetUserRPC)
 	bb.MustRegister("http://user-service/user/select", srv.SelectUsersRPC)
 	
@@ -23,12 +22,6 @@ type (
 	SelectUsersRPC func(ctx context.Context, req SelectUserRequest) (UserList, bb.ServiceError)
 	
 )
-
-type UserClient interface {
-	GetUserRPC(ctx context.Context, req GetUserRequest) (User, bb.ServiceError)
-	SelectUsersRPC(ctx context.Context, req SelectUserRequest) (UserList, bb.ServiceError)
-	
-}
 
 
 type UserClientImplementation struct {

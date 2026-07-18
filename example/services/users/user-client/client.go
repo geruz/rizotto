@@ -26,8 +26,8 @@ type UserList struct {
 	Users []User
 }
 
-//go:generate genbind --client=UserService
-type UserService interface {
+//go:generate genbind
+type UserClient interface {
 	// bind-method: http://user-service/user/get
 	GetUserRPC(ctx context.Context, req GetUserRequest) (User, bb.ServiceError)
 

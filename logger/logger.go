@@ -200,7 +200,7 @@ func mustCreatePrintLog(level LogLevel) func(ctx context.Context, message string
 		}
 
 		l := format(ctx, lp, message, messages...)
-		println(l)
+		println(l) //nolint:forbidigo
 	}
 }
 
@@ -243,7 +243,7 @@ func formatError(ctx context.Context, description string, err error, kvs ...stri
 }
 
 func Error(ctx context.Context, description string, err error, kvs ...string) {
-	println(formatError(ctx, description, err, kvs...))
+	println(formatError(ctx, description, err, kvs...)) //nolint:forbidigo
 }
 
 func ErrorText(ctx context.Context, message string, kvs ...string) {
