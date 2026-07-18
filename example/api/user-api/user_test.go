@@ -6,7 +6,7 @@ import (
 
 	"github.com/geruz/rizotto/bb"
 	"github.com/geruz/rizotto/example/api/doc"
-	"github.com/geruz/rizotto/example/services/user/user-client"
+	"github.com/geruz/rizotto/example/services/users/user-client"
 
 	"github.com/geruz/rizotto/documentation/openapi"
 	"github.com/geruz/rizotto/testutils/api"

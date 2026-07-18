@@ -1,4 +1,4 @@
-package sql
+package pg
 
 import (
 	"context"
@@ -22,6 +22,7 @@ func OpenConnection(ctx context.Context, connString string) (*pgxpool.Pool, erro
 	if err != nil {
 		return nil, err
 	}
+	config.ConnConfig.Tracer = pgTracer{}
 	for range tryCount {
 		pool, err := pgxpool.NewWithConfig(ctx, config)
 

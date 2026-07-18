@@ -3,7 +3,7 @@ package api
 import (
 	"github.com/geruz/rizotto"
 	"github.com/geruz/rizotto/example/api"
-	"github.com/geruz/rizotto/example/services/user/user-client"
+	"github.com/geruz/rizotto/example/services/users/user-client"
 	"github.com/geruz/rizotto/gateway"
 	"github.com/samber/lo"
 )

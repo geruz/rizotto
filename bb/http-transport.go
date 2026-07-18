@@ -14,6 +14,8 @@ import (
 	"github.com/geruz/rizotto/validators"
 	"github.com/go-chi/chi"
 	"github.com/goccy/go-json"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 )
 
 func makeHTTPHandler[TRequest any, TAnswer any, TError ServiceError](
@@ -28,11 +30,12 @@ func makeHTTPHandler[TRequest any, TAnswer any, TError ServiceError](
 		// ctx, span := trace.Span(ctx, uri)
 		// span.SetAttributes(trace.String("uri", uri))
 		// defer span.End()
-		requestsCountTotal.WithLabelValues(uri).Inc()
+		uriAttr := metric.WithAttributes(attribute.String("uri", uri))
+		requestsCountTotal.Add(ctx, 1, uriAttr)
 
 		defer func(start time.Time) {
 			duration := time.Since(start)
-			requestDuration.WithLabelValues(uri).Observe(duration.Seconds())
+			requestDuration.Record(ctx, duration.Seconds(), uriAttr)
 			logger.Trace(ctx, "Call service", logParams, logger.KVi("duration", duration.Milliseconds()))
 		}(time.Now())
 

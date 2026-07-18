@@ -1,47 +1,35 @@
 package metrics
 
 import (
-	"github.com/prometheus/client_golang/prometheus"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/metric"
 )
 
-var Percentiles_60_90_99 = map[float64]float64{
-	0.5:  0.05,  //nolint:mnd
-	0.9:  0.01,  //nolint:mnd
-	0.99: 0.001, //nolint:mnd
+var meter = otel.Meter("github.com/geruz/rizotto/metrics")
+
+var DurationBuckets_5ms_10s = []float64{
+	0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10,
 }
 
-func SummaryVec(
-	name string,
-	help string,
-	objectives map[float64]float64,
-	labels []string,
-) *prometheus.SummaryVec {
-	vec := prometheus.NewSummaryVec(
-		prometheus.SummaryOpts{ //nolint:exhaustruct
-			Name:       name,
-			Help:       help,
-			Objectives: objectives,
-		},
-		labels,
-	)
-	prometheus.MustRegister(vec)
+func Counter(name, help string) metric.Int64Counter {
+	counter, err := meter.Int64Counter(name, metric.WithDescription(help))
+	if err != nil {
+		panic(err)
+	}
 
-	return vec
+	return counter
 }
 
-func CounterVec(
-	name string,
-	help string,
-	labels []string,
-) *prometheus.CounterVec {
-	vec := prometheus.NewCounterVec(
-		prometheus.CounterOpts{ //nolint:exhaustruct
-			Name: name,
-			Help: help,
-		},
-		labels,
+func DurationHistogram(name, help string, bucketBoundaries []float64) metric.Float64Histogram {
+	histogram, err := meter.Float64Histogram(
+		name,
+		metric.WithDescription(help),
+		metric.WithUnit("s"),
+		metric.WithExplicitBucketBoundaries(bucketBoundaries...),
 	)
-	prometheus.MustRegister(vec)
+	if err != nil {
+		panic(err)
+	}
 
-	return vec
+	return histogram
 }

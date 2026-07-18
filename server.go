@@ -7,9 +7,11 @@ import (
 	"github.com/geruz/rizotto/logger"
 	"github.com/geruz/rizotto/metrics"
 	"github.com/geruz/rizotto/settings/env"
+	"github.com/geruz/rizotto/trace"
 )
 
 var InitMetrics = metrics.InitMetrics
+var MustInitTracer = trace.MustInit
 
 type HTTPContext = gateway.HTTPContext
 type Controller = gateway.Controller
@@ -23,7 +25,4 @@ func MustInitLogger(ctx context.Context) {
 }
 
 func InitScheduler(ctx context.Context) {
-}
-
-func InitTracer(ctx context.Context) {
 }

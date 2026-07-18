@@ -28,17 +28,15 @@ var (
 	events    = map[string]handlerEventParams{}
 )
 
-var requestsCountTotal = metrics.CounterVec(
+var requestsCountTotal = metrics.Counter(
 	"service_requests_total",
 	"Current service requests count.",
-	[]string{"uri"},
 )
 
-var requestDuration = metrics.SummaryVec(
+var requestDuration = metrics.DurationHistogram(
 	"service_requests_durations_seconds",
 	"Service requests durations in seconds.",
-	metrics.Percentiles_60_90_99,
-	[]string{"uri"},
+	metrics.DurationBuckets_5ms_10s,
 )
 
 func mustGetScheme(uri string) string {

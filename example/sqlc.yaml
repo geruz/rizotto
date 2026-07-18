@@ -1,0 +1,12 @@
+version: "2"
+sql:
+    - engine: "postgresql"
+      queries: "./services/users/repository/sql/user-queries.sql"
+      schema:
+          - "./services/users/repository/sql/schema.sql"
+      gen:
+          go:
+              sql_package: pgx/v5
+              out: ./services/users/repository/db
+              emit_pointers_for_null_types: true
+              emit_enum_valid_method: true

@@ -1,13 +1,27 @@
 version: "3"
-
+dotenv: [".env"]
+vars:
+    SQLC_VERSION: 1.26.0
+includes:
+    users:
+        taskfile: ./services/users/Taskfile.yml
+        dir: ./services/users
 tasks:
-  start:
-    cmds:
-      - go run .
-    silent: true
+    start:
+        cmds:
+            - go run .
+        silent: true
 
-  test:
-    cmds:
-      - go test ./... -coverprofile=out/cover.out
-      - go tool cover -func ./out/cover.out
-    silent: true
+    test:
+        cmds:
+            - go test ./... -coverprofile=out/cover.out
+            - go tool cover -func ./out/cover.out
+        silent: true
+
+    migrate-up:
+        cmds:
+            - task: users:migrate-up
+    gen:
+        cmds:
+            - PATH="$(go env GOPATH)/bin:$PATH" go generate ./...
+            - docker run --rm --user "$(id -u):$(id -g)" -v "$(pwd):/src" -w /src sqlc/sqlc:{{.SQLC_VERSION}} generate

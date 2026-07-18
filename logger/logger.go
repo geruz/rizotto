@@ -10,6 +10,7 @@ import (
 
 	"github.com/geruz/rizotto/meta"
 	"github.com/geruz/rizotto/settings/env"
+	"github.com/samber/lo"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 )
@@ -129,13 +130,17 @@ func fromCtx(ctx context.Context) (string, string) {
 
 	for k, v := range meta.GetMeta(ctx) {
 		if k == "namespace" {
-			leftSb108.WriteString("[" + v + "]" + " ")
+			leftSb108.WriteString("[")
+			leftSb108.WriteString(v)
+			leftSb108.WriteString("] ")
 		} else {
 			if !firstIterFroRight {
 				rightSb108.WriteString(" ")
 			}
 
-			rightSb108.WriteString(k + "=" + v)
+			rightSb108.WriteString(k)
+			rightSb108.WriteString("=")
+			rightSb108.WriteString(v)
 
 			firstIterFroRight = false
 		}
@@ -163,7 +168,8 @@ func format(ctx context.Context, lp string, message string, messages ...string) 
 
 	var lSb134 strings.Builder
 	for _, message := range messages {
-		lSb134.WriteString(" " + message)
+		lSb134.WriteString(" ")
+		lSb134.WriteString(message)
 	}
 
 	l += lSb134.String()
@@ -194,7 +200,7 @@ func mustCreatePrintLog(level LogLevel) func(ctx context.Context, message string
 		}
 
 		l := format(ctx, lp, message, messages...)
-		println(l) //nolint
+		println(l)
 	}
 }
 
@@ -237,7 +243,7 @@ func formatError(ctx context.Context, description string, err error, kvs ...stri
 }
 
 func Error(ctx context.Context, description string, err error, kvs ...string) {
-	println(formatError(ctx, description, err, kvs...)) //nolint
+	println(formatError(ctx, description, err, kvs...))
 }
 
 func ErrorText(ctx context.Context, message string, kvs ...string) {
@@ -248,4 +254,23 @@ func ErrorIfExists(ctx context.Context, err error) {
 	if err != nil {
 		Error(ctx, "", err)
 	}
+}
+
+type ctxKV struct{}
+
+func WithParams(ctx context.Context, params map[string]string) context.Context {
+	return context.WithValue(ctx, ctxKV{}, lo.Assign(
+		getAdditionalInfo(ctx),
+		params,
+	))
+}
+func getAdditionalInfo(ctx context.Context) map[string]string {
+	if ctx == nil {
+		return nil
+	}
+	if kvs, ok := ctx.Value(ctxKV{}).(map[string]string); ok {
+		return kvs
+	}
+
+	return nil
 }
