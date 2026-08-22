@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/url"
+	"sync"
 
 	"github.com/geruz/rizotto/logger"
 	"github.com/geruz/rizotto/metrics"
@@ -23,10 +24,29 @@ type handlerEventParams struct {
 	handler    func(context.Context, any) bool
 }
 
+// handlersMu guards callbacks and events. Registration happens at startup, but
+// tests register from parallel goroutines, and MustBind reads on every call.
 var (
-	callbacks = map[string]handlerRPCParams{}
-	events    = map[string]handlerEventParams{}
+	handlersMu sync.RWMutex
+	callbacks  = map[string]handlerRPCParams{}
+	events     = map[string]handlerEventParams{}
 )
+
+// mustClaimURI reserves uri for one handler. Both maps share the routing path
+// space, so a URI taken by either kind is taken for both.
+//
+// It panics on a repeat: a duplicate address is a copy-paste of a bind-method
+// comment, and silently keeping one of the two handlers hides the mistake at
+// startup and at call time alike.
+func mustClaimURI(uri string) {
+	if _, ok := callbacks[uri]; ok {
+		panic("bb: RPC already registered: " + uri)
+	}
+
+	if _, ok := events[uri]; ok {
+		panic("bb: event already registered: " + uri)
+	}
+}
 
 var requestsCountTotal = metrics.Counter(
 	"service_requests_total",
@@ -92,7 +112,10 @@ func MustBind[
 	method := parts.Path
 
 	return T_RPC(func(ctx context.Context, req TRequest) (TAnswer, ServiceError) {
+		handlersMu.RLock()
 		params, ok := callbacks[uri]
+		handlersMu.RUnlock()
+
 		if !ok {
 			logger.Error(ctx, "method not registered", nil, logger.KV("uri", uri))
 			var answer TAnswer
@@ -127,6 +150,11 @@ func MustRegister[TRequest any, TAnswer any, TError ServiceError](
 	case natsProtocol:
 		panic("nats not implemented for RPC")
 	case httpProtocol:
+		handlersMu.Lock()
+		defer handlersMu.Unlock()
+
+		mustClaimURI(uri)
+
 		callbacks[uri] = handlerRPCParams{
 			newRequest: func() any { return new(TRequest) },
 			handler:    makeHTTPHandler(uri, handler),
@@ -147,6 +175,11 @@ func MustRegisterEvent[TRequest any](uri string, handler func(context.Context, T
 	scheme := mustGetScheme(uri)
 	switch scheme {
 	case httpProtocol:
+		handlersMu.Lock()
+		defer handlersMu.Unlock()
+
+		mustClaimURI(uri)
+
 		events[uri] = newHandlerEventParams[TRequest](makeHTTPEventHandler(handler))
 	default:
 		panic("Unknown scheme: " + scheme)

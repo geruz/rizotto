@@ -81,8 +81,12 @@ func makeHTTPEventHandler[TRequest any](
 	}
 }
 
-func StartHTTPEndpoint(ctx context.Context, port string) {
-	router := chi.NewRouter()
+// mountHandlers mounts every registered handler on router. It holds the read
+// lock only while walking the maps, so the server goroutine below never runs
+// with the lock held.
+func mountHandlers(ctx context.Context, router *chi.Mux) {
+	handlersMu.RLock()
+	defer handlersMu.RUnlock()
 
 	for uri, handlerParams := range callbacks {
 		u, _ := url.Parse(uri)
@@ -103,6 +107,12 @@ func StartHTTPEndpoint(ctx context.Context, port string) {
 		registerEventRoute(router, u, handlerParams)
 		logger.Info(ctx, "Registering service endpoint: "+u.Path)
 	}
+}
+
+func StartHTTPEndpoint(ctx context.Context, port string) {
+	router := chi.NewRouter()
+
+	mountHandlers(ctx, router)
 
 	wrongMethod := func(w http.ResponseWriter, r *http.Request) {
 		err := NewNotImplementedError("-", r.URL.Path)
