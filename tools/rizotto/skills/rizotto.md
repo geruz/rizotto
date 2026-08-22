@@ -22,6 +22,7 @@ OpenAPI documentation) comes from the framework packages.
 ## Project layout
 
     server.go                       bootstrap: settings, services, routes
+    .claude/skills/rizotto/         the Claude Code skill pointing back at these commands
     .env / .env.example             configuration, .env imports .env.example
     Taskfile.yml                    task deps | start | test | lint | gen | migrate-up
     sqlc.yaml                       one entry per service that owns a table
@@ -39,7 +40,7 @@ func main() {
     ctx := context.Background()
     rizotto.MustInitEnv(ctx)     // loads .env (and the files named in IMPORT_ENV_FILES)
     rizotto.MustInitLogger(ctx)  // LOG_LEVEL
-    rizotto.InitMetrics(ctx, ":"+env.GetStringValue("METRICS_PORT", "9091")) // /metrics
+    rizotto.MustInitMetrics(ctx, ":"+env.GetStringValue("METRICS_PORT", "9091")) // /metrics
     rizotto.MustInitTracer(ctx, map[string]string{ // OTLP, configured by OTEL_* variables
         "service.name":    env.MustGetStringValue("SERVICE_NAME"),
         "service.version": env.MustGetStringValue("SERVICE_VERSION"),

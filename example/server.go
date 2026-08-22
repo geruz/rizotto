@@ -18,7 +18,7 @@ func main() {
 	rizotto.MustInitEnv(ctx)
 	rizotto.MustInitLogger(ctx)
 
-	rizotto.InitMetrics(ctx, ":"+env.GetStringValue("METRICS_PORT", "9091"))
+	rizotto.MustInitMetrics(ctx, ":"+env.GetStringValue("METRICS_PORT", "9091"))
 	rizotto.MustInitTracer(ctx, map[string]string{
 		"service.name":    env.MustGetStringValue("SERVICE_NAME"),
 		"service.version": env.MustGetStringValue("SERVICE_VERSION"),
