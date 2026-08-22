@@ -431,7 +431,7 @@ func (o *Operation) addRequestBody(desc string, fields []reflect.StructField, ex
 
 	content := o.RequestBody.Content[jsonContentType]
 	if content.Schema == nil {
-		//nolint:exhaustruct // an object schema only needs its properties
+		//nolint:exhaustruct_v5 // an object schema only needs its properties
 		content.Schema = &Schema{
 			Type:                 "object",
 			Properties:           properties,

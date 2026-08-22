@@ -93,9 +93,9 @@ func addSqlcEntry(projectRoot string, spec serviceSpec) (bool, error) {
 func appendSqlcEntry(root *yaml.Node, entry sqlcEntry) (bool, error) {
 	sequence := findMapValue(root, "sql")
 	if sequence == nil {
-		sequence = &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq"} //nolint:exhaustruct // the encoder fills the rest
+		sequence = &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq"} //nolint:exhaustruct_v5 // the encoder fills the rest
 		root.Content = append(root.Content,
-			&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: "sql"}, //nolint:exhaustruct // key node
+			&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: "sql"}, //nolint:exhaustruct_v5 // key node
 			sequence,
 		)
 	}
@@ -111,7 +111,7 @@ func appendSqlcEntry(root *yaml.Node, entry sqlcEntry) (bool, error) {
 		}
 	}
 
-	node := &yaml.Node{} //nolint:exhaustruct // filled by Encode
+	node := &yaml.Node{} //nolint:exhaustruct_v5 // filled by Encode
 
 	err := node.Encode(entry)
 	if err != nil {

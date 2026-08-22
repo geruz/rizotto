@@ -41,7 +41,7 @@ type serviceFlags struct {
 }
 
 func bindServiceFlags(fs *flag.FlagSet) *serviceFlags {
-	f := &serviceFlags{} //nolint:exhaustruct // filled by the flag package
+	f := &serviceFlags{} //nolint:exhaustruct_v5 // filled by the flag package
 
 	fs.StringVar(&f.name, "name", "", "service name: english letters and digits, e.g. Order")
 	fs.StringVar(&f.project, "project", "", `path inside the project the service is added to (default ".")`)

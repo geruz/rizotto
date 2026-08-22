@@ -36,7 +36,7 @@ type controllerFlags struct {
 }
 
 func bindControllerFlags(fs *flag.FlagSet) *controllerFlags {
-	f := &controllerFlags{} //nolint:exhaustruct // filled by the flag package
+	f := &controllerFlags{} //nolint:exhaustruct_v5 // filled by the flag package
 
 	fs.StringVar(&f.name, "name", "", "controller name (default: the name of the service it exposes)")
 	fs.StringVar(&f.service, "service", "", "service the controller exposes, e.g. order")

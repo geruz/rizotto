@@ -84,7 +84,7 @@ func (pl pgTracer) getSQLName(query string) string {
 	}
 	const nameParts = 2
 
-	firstLine := strings.Split(query, "\n")[0]
+	firstLine, _, _ := strings.Cut(query, "\n")
 	lines := strings.SplitN(firstLine, "name: ", nameParts)
 	if len(lines) != nameParts {
 		return "unknown"

@@ -42,7 +42,7 @@ func startServer(ctx context.Context, httpAddr string) {
 
 	const readHeaderTimeout = 10 * time.Second
 
-	srv := &http.Server{ //nolint:exhaustruct
+	srv := &http.Server{ //nolint:exhaustruct_v5
 		Addr:              httpAddr,
 		Handler:           mux,
 		ReadHeaderTimeout: readHeaderTimeout,

@@ -15,8 +15,10 @@ linters:
         - ireturn
         - gochecknoglobals
         - gochecknoinits
+        - exhaustruct
     enable:
         - gomodguard_v2
+        - exhaustruct_v5
 
     # settings:
     #     tagliatelle:

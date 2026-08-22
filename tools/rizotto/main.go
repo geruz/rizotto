@@ -98,7 +98,7 @@ type makeProjectFlags struct {
 }
 
 func bindMakeProjectFlags(fs *flag.FlagSet) *makeProjectFlags {
-	f := &makeProjectFlags{} //nolint:exhaustruct // filled by the flag package
+	f := &makeProjectFlags{} //nolint:exhaustruct_v5 // filled by the flag package
 
 	fs.StringVar(&f.name, "name", "", "project name: english letters and digits, usable as an identifier")
 	fs.StringVar(&f.path, "path", "", `directory the project folder is created in (default ".")`)

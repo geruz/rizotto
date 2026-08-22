@@ -45,7 +45,7 @@ func init() {
 	}
 
 	validate.RegisterCustomTypeFunc(func(field reflect.Value) any {
-		if valuer, ok := field.Interface().(decimal.Decimal); ok {
+		if valuer, ok := reflect.TypeAssert[decimal.Decimal](field); ok {
 			return valuer.String()
 		}
 
@@ -126,7 +126,7 @@ func tryGetValidationFieldNameFrom(str reflect.StructField) (string, bool) {
 }
 
 func ValidateMaxDecimals(fl validator.FieldLevel) bool {
-	data, ok := fl.Field().Interface().(string)
+	data, ok := reflect.TypeAssert[string](fl.Field())
 	if !ok {
 		return false
 	}
@@ -145,7 +145,7 @@ func ValidateMaxDecimals(fl validator.FieldLevel) bool {
 }
 
 func ValidateDecimalGreatOrEq(fl validator.FieldLevel) bool {
-	data, ok := fl.Field().Interface().(string)
+	data, ok := reflect.TypeAssert[string](fl.Field())
 	if !ok {
 		return false
 	}

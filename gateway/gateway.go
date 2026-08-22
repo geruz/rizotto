@@ -28,7 +28,7 @@ func (s HTTPGateway) ListenAndServe(ctx context.Context, addr string) error {
 
 	const readHeaderTimeout = 10 * time.Second
 
-	srv := &http.Server{ //nolint:exhaustruct
+	srv := &http.Server{ //nolint:exhaustruct_v5
 		Addr:              addr,
 		Handler:           s.router,
 		ReadHeaderTimeout: readHeaderTimeout,

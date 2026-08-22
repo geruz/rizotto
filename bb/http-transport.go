@@ -121,7 +121,7 @@ func StartHTTPEndpoint(ctx context.Context, port string) {
 
 		const readHeaderTimeout = 10 * time.Second
 
-		srv := &http.Server{ //nolint:exhaustruct
+		srv := &http.Server{ //nolint:exhaustruct_v5
 			Addr:              ":" + port,
 			Handler:           router,
 			ReadHeaderTimeout: readHeaderTimeout,

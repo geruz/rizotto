@@ -38,7 +38,7 @@ func Test_patchContextByCustomHeaders_ShouldPatchHeaders(t *testing.T) {
 			t.Parallel()
 
 			// Arrange.
-			req := http.Request{Header: http.Header{}} //nolint:exhaustruct
+			req := http.Request{Header: http.Header{}} //nolint:exhaustruct_v5
 			req.Header.Set(tc.headerName, tc.headerValue)
 
 			// Act.
