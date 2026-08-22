@@ -2,7 +2,6 @@ package usersrv
 
 import (
 	"context"
-	"math"
 
 	"github.com/geruz/rizotto/bb"
 	"github.com/geruz/rizotto/example/services/users/repository"
@@ -21,11 +20,11 @@ func NewUserService(pool *pgxpool.Pool) UserService {
 }
 
 func (srv UserService) GetUserRPC(ctx context.Context, req user.GetUserRequest) (user.User, bb.ServiceError) {
-	if req.UserID < 0 || req.UserID > math.MaxInt32 {
+	if req.UserID <= 0 {
 		return user.User{}, bb.NewInvalidRequestError("invalid user id")
 	}
 
-	dbUser, err := srv.repo.GetUserByID(ctx, int32(req.UserID))
+	dbUser, err := srv.repo.GetUserByID(ctx, int64(req.UserID))
 	if err != nil {
 		if pg.IsNotFoundError(err) {
 			return user.User{}, bb.NewNotFoundError("user not found")

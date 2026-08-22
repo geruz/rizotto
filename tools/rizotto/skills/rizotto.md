@@ -108,4 +108,5 @@ from the standard `OTEL_EXPORTER_OTLP_*` variables.
 
 `task gen` needs the `genbind` binary: `go install github.com/geruz/rizotto/tools/genbind@latest`.
 
-Run `rizotto service skill` and `rizotto controller skill` for the details of each layer.
+Run `rizotto service skill`, `rizotto controller skill` and
+`rizotto repository skill` for the details of each layer.

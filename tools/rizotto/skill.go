@@ -17,7 +17,19 @@ const (
 	skillCommand = "skill"
 	// projectSkill is the document behind "rizotto skill".
 	projectSkill = "rizotto"
+	// repositorySkill is the document behind "rizotto repository skill".
+	repositorySkill = "repository"
 )
+
+const repositoryUsage = `Usage:
+	rizotto repository skill
+
+Prints how the database layer of a service works: the column conventions, the
+sqlc queries, the dbmate migrations and the transaction helpers.
+
+Repositories are not scaffolded on their own — "rizotto service add -db yes"
+writes one together with the service that owns it.
+`
 
 var errUnknownSkill = errors.New("unknown skill")
 
@@ -46,4 +58,23 @@ func runSkill(args []string, out io.Writer) error {
 	}
 
 	return printSkill(out, projectSkill)
+}
+
+// runRepository serves "rizotto repository", which only prints its skill: a
+// repository belongs to the service that owns the table, so it has no "add".
+func runRepository(args []string, out io.Writer) error {
+	if len(args) == 0 {
+		return fmt.Errorf("%w: missing subcommand\n\n%s", errUsage, repositoryUsage)
+	}
+
+	switch args[0] {
+	case skillCommand:
+		return printSkill(out, repositorySkill)
+	case helpCommand, helpFlagShort, helpFlagLong:
+		_, _ = fmt.Fprint(out, repositoryUsage)
+
+		return nil
+	default:
+		return fmt.Errorf("%w: unknown subcommand %q\n\n%s", errUsage, args[0], repositoryUsage)
+	}
 }

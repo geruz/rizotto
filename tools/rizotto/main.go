@@ -19,6 +19,7 @@ Usage:
 	rizotto make-project [flags]
 	rizotto service add [flags]
 	rizotto controller add [flags]
+	rizotto repository skill
 	rizotto skill
 	rizotto help
 
@@ -29,8 +30,10 @@ Commands:
 	               works with the database and which CRUD methods it needs
 	controller add scaffold an HTTP controller for one of the services, asking
 	               which routes it serves and whether they need authentication
-	skill          print what a rizotto project is made of; "service skill" and
-	               "controller skill" print the details of one layer
+	repository     "repository skill" prints how the database layer works: the
+	               column conventions, the sqlc queries and the migrations
+	skill          print what a rizotto project is made of; "service skill",
+	               "controller skill" and "repository skill" print one layer
 
 Every answer can be given upfront with a flag; the remaining ones are asked step
 by step.
@@ -38,6 +41,9 @@ by step.
 
 const (
 	helpCommand = "help"
+	// helpFlagShort and helpFlagLong ask for the usage of any command.
+	helpFlagShort = "-h"
+	helpFlagLong  = "--help"
 
 	exitFailure = 1
 	exitUsage   = 2
@@ -47,9 +53,33 @@ const (
 
 var (
 	errUsage          = errors.New("wrong usage")
+	errUnknownCommand = errors.New("unknown command")
 	errTargetNotEmpty = errors.New("target directory is not empty, pass -force to generate into it anyway")
 	errSQLAnswer      = errors.New(`-sql expects "yes" or "no"`)
 )
+
+// runCommand dispatches one command and returns errUnknownCommand for a name
+// no command answers to.
+func runCommand(command string, args []string) error {
+	switch command {
+	case "make-project":
+		return runMakeProject(args, os.Stdin, os.Stdout)
+	case "service":
+		return runService(args, os.Stdin, os.Stdout)
+	case "controller":
+		return runController(args, os.Stdin, os.Stdout)
+	case "repository":
+		return runRepository(args, os.Stdout)
+	case skillCommand:
+		return runSkill(args, os.Stdout)
+	case helpCommand, helpFlagShort, helpFlagLong:
+		_, _ = fmt.Fprint(os.Stdout, toolUsage)
+
+		return nil
+	default:
+		return fmt.Errorf("%w %q", errUnknownCommand, command)
+	}
+}
 
 func main() {
 	if len(os.Args) <= commandArg {
@@ -57,21 +87,10 @@ func main() {
 		os.Exit(exitUsage)
 	}
 
-	var err error
+	err := runCommand(os.Args[commandArg], os.Args[commandArg+1:])
 
-	switch os.Args[commandArg] {
-	case "make-project":
-		err = runMakeProject(os.Args[commandArg+1:], os.Stdin, os.Stdout)
-	case "service":
-		err = runService(os.Args[commandArg+1:], os.Stdin, os.Stdout)
-	case "controller":
-		err = runController(os.Args[commandArg+1:], os.Stdin, os.Stdout)
-	case skillCommand:
-		err = runSkill(os.Args[commandArg+1:], os.Stdout)
-	case helpCommand, "-h", "--help":
-		_, _ = fmt.Fprint(os.Stdout, toolUsage)
-	default:
-		_, _ = fmt.Fprintf(os.Stderr, "unknown command %q\n\n%s", os.Args[commandArg], toolUsage)
+	if errors.Is(err, errUnknownCommand) {
+		_, _ = fmt.Fprintf(os.Stderr, "%s\n\n%s", err.Error(), toolUsage)
 		os.Exit(exitUsage)
 	}
 
@@ -236,7 +255,7 @@ func dispatchAdd(args []string, usage string, skill string, out io.Writer, add f
 		return add(args[1:])
 	case skillCommand:
 		return printSkill(out, skill)
-	case helpCommand, "-h", "--help":
+	case helpCommand, helpFlagShort, helpFlagLong:
 		_, _ = fmt.Fprint(out, usage)
 
 		return nil

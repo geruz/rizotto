@@ -67,9 +67,43 @@ func Test_runController_PrintsTheControllerSkill(t *testing.T) {
 	must.StrContains(t, printed, "openapi.yml")
 }
 
+func Test_runRepository_PrintsTheRepositorySkill(t *testing.T) {
+	t.Parallel()
+
+	out := &bytes.Buffer{}
+
+	err := runRepository([]string{skillCommand}, out)
+	must.NoError(t, err)
+
+	printed := out.String()
+	must.StrHasPrefix(t, "# Repositories", printed)
+	must.StrContains(t, printed, "BIGSERIAL")
+	must.StrContains(t, printed, "TIMESTAMP")
+	must.StrContains(t, printed, "int64")
+	must.StrContains(t, printed, "pg.IsNotFoundError")
+	must.StrContains(t, printed, "task migrate-up")
+}
+
+func Test_runRepository_RejectsAdd(t *testing.T) {
+	t.Parallel()
+
+	out := &bytes.Buffer{}
+
+	err := runRepository([]string{"add"}, out)
+	must.ErrorIs(t, err, errUsage)
+	must.StrContains(t, err.Error(), "rizotto service add -db yes")
+}
+
+func Test_runRepository_MissingSubcommand(t *testing.T) {
+	t.Parallel()
+
+	err := runRepository(nil, &bytes.Buffer{})
+	must.ErrorIs(t, err, errUsage)
+}
+
 func Test_printSkill_UnknownSkill(t *testing.T) {
 	t.Parallel()
 
-	err := printSkill(&bytes.Buffer{}, "repository")
+	err := printSkill(&bytes.Buffer{}, "gateway")
 	must.ErrorIs(t, err, errUnknownSkill)
 }

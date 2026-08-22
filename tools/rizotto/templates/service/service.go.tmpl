@@ -4,9 +4,6 @@ package {{.Package}}
 
 import (
 	"context"
-{{- if or .NeedsID .List}}
-	"math"
-{{- end}}
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -76,15 +73,15 @@ func (srv {{.Name}}Service) Select{{.NamePlural}}RPC(
 	req {{.Lower}}.Select{{.NamePlural}}Request,
 ) ({{.Lower}}.{{.Name}}List, bb.ServiceError) {
 	limit, offset := req.Limit, req.Offset
-	if limit <= 0 || limit > math.MaxInt32 {
+	if limit <= 0 {
 		limit = defaultLimit
 	}
 
-	if offset < 0 || offset > math.MaxInt32 {
+	if offset < 0 {
 		offset = 0
 	}
 
-	rows, err := srv.repo.Select{{.NamePlural}}(ctx, int32(limit), int32(offset))
+	rows, err := srv.repo.Select{{.NamePlural}}(ctx, int64(limit), int64(offset))
 	if err != nil {
 		return {{.Lower}}.{{.Name}}List{}, bb.NewInternalError("failed to select {{.LowerPlural}}", err)
 	}
@@ -147,12 +144,12 @@ func (srv {{.Name}}Service) Delete{{.Name}}RPC(
 	return {{.Lower}}.Deleted{{.Name}}{ {{.Name}}ID: int(deleted.ID)}, nil
 }
 {{end}}{{if .NeedsID}}
-func to{{.Name}}ID(id int) (int32, bb.ServiceError) {
-	if id <= 0 || id > math.MaxInt32 {
+func to{{.Name}}ID(id int) (int64, bb.ServiceError) {
+	if id <= 0 {
 		return 0, bb.NewInvalidRequestError("invalid {{.Lower}} id")
 	}
 
-	return int32(id), nil
+	return int64(id), nil
 }
 {{end}}{{if .NeedsModel}}
 func to{{.Name}}(row db.{{.Name}}) {{.Lower}}.{{.Name}} {

@@ -13,7 +13,7 @@ WHERE id = $1;
 SELECT *
 FROM public.{{.LowerPlural}}
 ORDER BY created_at DESC, id DESC
-LIMIT $1 OFFSET $2;
+LIMIT sqlc.arg('limit')::bigint OFFSET sqlc.arg('offset')::bigint;
 {{end}}{{if .Update}}
 -- name: Update{{.Name}} :one
 UPDATE public.{{.LowerPlural}}

@@ -137,6 +137,68 @@ func Test_generateService_WithDatabase(t *testing.T) {
 		"// bind-method: http://order-service/order/create")
 }
 
+// Test_generateService_StoresIntegersAs64Bit pins the column conventions the
+// repository skill documents: BIGSERIAL keys typed as int64 all the way up, so
+// no service needs a math.MaxInt32 guard to reach its own table.
+func Test_generateService_StoresIntegersAs64Bit(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+
+	spec, err := newServiceSpec(testModule, testService, allMethods, true)
+	must.NoError(t, err)
+
+	_, err = generateService(spec, root)
+	must.NoError(t, err)
+
+	for _, file := range []string{
+		"services/order/repository/sql/schema.sql",
+		"services/order/repository/migrations/000001_create_orders.sql",
+	} {
+		must.StrContains(t, readFile(t, root, file), "id BIGSERIAL PRIMARY KEY")
+	}
+
+	must.StrContains(t, readFile(t, root, "services/order/repository/db/models.go"), "ID        int64")
+	must.StrContains(t, readFile(t, root, "services/order/repository/order-repository.go"),
+		"GetOrderByID(ctx context.Context, id int64)")
+
+	// LIMIT/OFFSET have no column to take their type from, so sqlc types a bare
+	// placeholder as int32; the cast is what keeps the pair int64.
+	must.StrContains(t, readFile(t, root, "services/order/repository/sql/order-queries.sql"),
+		"LIMIT sqlc.arg('limit')::bigint OFFSET sqlc.arg('offset')::bigint")
+
+	service := readFile(t, root, "services/order/order-service.go")
+	must.StrContains(t, service, "func toOrderID(id int) (int64, bb.ServiceError)")
+	must.StrNotContains(t, service, "math.MaxInt32")
+	must.StrNotContains(t, service, "int32(")
+}
+
+// Test_generateService_TimestampsHaveNoTimeZone pins the other half of the
+// convention: TIMESTAMP, so Postgres never converts on read.
+func Test_generateService_TimestampsHaveNoTimeZone(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+
+	spec, err := newServiceSpec(testModule, testService, allMethods, true)
+	must.NoError(t, err)
+
+	_, err = generateService(spec, root)
+	must.NoError(t, err)
+
+	for _, file := range []string{
+		"services/order/repository/sql/schema.sql",
+		"services/order/repository/migrations/000001_create_orders.sql",
+	} {
+		schema := readFile(t, root, file)
+		must.StrContains(t, schema, "created_at TIMESTAMP NOT NULL DEFAULT NOW()")
+		must.StrContains(t, schema, "updated_at TIMESTAMP NOT NULL DEFAULT NOW()")
+		must.StrNotContains(t, schema, "TIMESTAMPTZ")
+	}
+
+	must.StrContains(t, readFile(t, root, "services/order/repository/db/models.go"), "pgtype.Timestamp")
+}
+
 func Test_generateService_WithoutDatabase(t *testing.T) {
 	t.Parallel()
 

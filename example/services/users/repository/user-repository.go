@@ -25,6 +25,6 @@ func (r UserRepository) GetAllUsers(ctx context.Context) ([]db.User, error) {
 	return r.queries.GetAllUsers(ctx)
 }
 
-func (r UserRepository) GetUserByID(ctx context.Context, id int32) (db.User, error) {
+func (r UserRepository) GetUserByID(ctx context.Context, id int64) (db.User, error) {
 	return r.queries.GetUser(ctx, id)
 }

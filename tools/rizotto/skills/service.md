@@ -143,7 +143,7 @@ func NewOrderRepository(pool *pgxpool.Pool) OrderRepository {
     return OrderRepository{Repository: pg.NewRepository(pool), queries: db.New(pool)}
 }
 
-func (r OrderRepository) GetOrderByID(ctx context.Context, id int32) (db.Order, error) {
+func (r OrderRepository) GetOrderByID(ctx context.Context, id int64) (db.Order, error) {
     return r.queries.GetOrder(ctx, id)
 }
 ```
@@ -156,13 +156,18 @@ docker, driven by `sqlc.yaml`, which has one entry per service):
 SELECT * FROM public.orders WHERE id = $1;
 
 -- name: SelectOrders :many
-SELECT * FROM public.orders ORDER BY created_at DESC, id DESC LIMIT $1 OFFSET $2;
+SELECT * FROM public.orders ORDER BY created_at DESC, id DESC
+LIMIT sqlc.arg('limit')::bigint OFFSET sqlc.arg('offset')::bigint;
 ```
 
 Every schema change needs both a migration (`repository/migrations/`, applied by
 `task migrate-up`) and the matching edit in `repository/sql/schema.sql`, which is
 what sqlc reads. `pg.IsNotFoundError(err)` recognises "no rows"; use `WithTx` on the
 queries for transactions.
+
+Run `rizotto repository skill` before writing a query, a migration or a column:
+it has the column conventions (`BIGSERIAL`/`int64`, `TIMESTAMP` in UTC), the
+pagination rules and the transaction helpers.
 
 ## 6. Testing
 
