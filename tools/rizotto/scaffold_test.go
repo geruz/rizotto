@@ -26,6 +26,7 @@ func Test_generate_ProjectWithoutSQL(t *testing.T) {
 	must.NoError(t, err)
 
 	mustHaveFiles(t, target, files,
+		".claude/skills/rizotto/SKILL.md",
 		".env",
 		".gitignore",
 		".golangci.yml",
@@ -50,6 +51,10 @@ func Test_generate_ProjectWithoutSQL(t *testing.T) {
 	must.StrContains(t, readFile(t, target, "server.go"), "itemsrv.NewItemService()")
 	must.StrContains(t, readFile(t, target, "services/item/item-service.go"), "[]item.Item")
 	must.StrContains(t, readFile(t, target, "services/item/item-client/client.go"), "http://item-service/item/get")
+
+	skill := readFile(t, target, ".claude/skills/rizotto/SKILL.md")
+	must.StrContains(t, skill, "name: rizotto")
+	must.StrContains(t, skill, "rizotto skill")
 }
 
 func Test_generate_ProjectWithSQL(t *testing.T) {

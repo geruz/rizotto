@@ -34,9 +34,14 @@ rizotto service skill      # services in detail
 rizotto controller skill   # controllers in detail
 ```
 
+`.claude/skills/rizotto/SKILL.md` points Claude Code at those same commands, so an
+agent working in this repository asks the installed binary instead of guessing at
+the conventions.
+
 ## Layout
 
     server.go                     wires the settings, the services and the HTTP routes
+    .claude/skills/rizotto/       the Claude Code skill describing how to work in this project
     api/controller.go             HTTP contexts shared by the controllers (authentication lives here)
     api/doc/                      the OpenAPI document the route tests fill in
     services/item/                the item service: the RPC implementation

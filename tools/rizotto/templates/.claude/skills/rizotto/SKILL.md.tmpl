@@ -1,0 +1,61 @@
+---
+name: rizotto
+description: Scaffold and extend projects built with the rizotto framework — creating a project, adding services, adding HTTP controllers, and understanding how its layers fit together. Use whenever the user works in a rizotto project, mentions the rizotto CLI, or asks to add a service, controller, or CRUD layer to one.
+allowed-tools: Bash(rizotto:*)
+---
+
+# rizotto
+
+The `rizotto` binary documents itself. Never describe rizotto's structure,
+conventions, or generated layout from memory — ask the binary, because its
+output matches the version actually installed.
+
+## Step 1 — always start here
+
+```bash
+rizotto skill
+```
+
+This prints what a rizotto project is made of. Read it before touching any
+file in the project.
+
+If the command is not found, stop and tell the user rizotto is not installed
+or not on PATH. Do not guess at its API or hand-write files that look like
+rizotto code.
+
+## Step 2 — load one layer, only when you need it
+
+Do not run these upfront. Run one when the task actually reaches that layer:
+
+```bash
+rizotto service skill      # before adding or changing a service
+rizotto controller skill   # before adding or changing an HTTP controller
+```
+
+## Scaffolding: never let the CLI go interactive
+
+`make-project`, `service add`, and `controller add` ask for their answers step
+by step when flags are missing. An interactive prompt will hang the session,
+so every answer must be supplied upfront:
+
+1. Run `rizotto <command> --help` to learn the exact flag names for this
+   version.
+2. Fill in every flag.
+3. Any answer you do not know — project name, target directory, git repo,
+   whether SQL is needed, which CRUD methods, which routes, whether routes
+   need authentication — is a decision for the user, not a default to invent.
+   Ask them, then run the command once with the complete flag set.
+
+Prefer one fully-specified invocation over a retry loop.
+
+## Working order
+
+Scaffold first, then edit. The generators own the file layout and the wiring
+between layers; hand-written files that skip them tend to be wired up wrong.
+
+- New project → `make-project`
+- New domain capability → `service add`, then `controller add` to expose it
+- A controller is scaffolded _for an existing service_, so the service must
+  exist first.
+
+After scaffolding, report which files were created before modifying them.

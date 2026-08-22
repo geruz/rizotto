@@ -11,7 +11,10 @@ import (
 	"text/template"
 )
 
-//go:embed templates
+// templatesFS holds the project templates. The all: prefix keeps the dot
+// directories, so that templates/.claude ships with the binary.
+//
+//go:embed all:templates
 var templatesFS embed.FS
 
 const (
@@ -49,6 +52,7 @@ var projectFiles = []fileSpec{
 	{tmpl: "Taskfile.yml.tmpl", out: "Taskfile.yml", sqlOnly: always},
 	{tmpl: "README.md.tmpl", out: "README.md", sqlOnly: always},
 	{tmpl: "server.go.tmpl", out: "server.go", sqlOnly: always},
+	{tmpl: ".claude/skills/rizotto/SKILL.md.tmpl", out: ".claude/skills/rizotto/SKILL.md", sqlOnly: always},
 
 	{tmpl: "api/controller.go.tmpl", out: "api/controller.go", sqlOnly: always},
 	{tmpl: "api/doc/main.go.tmpl", out: "api/doc/main.go", sqlOnly: always},
