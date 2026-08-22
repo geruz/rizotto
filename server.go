@@ -10,7 +10,7 @@ import (
 	"github.com/geruz/rizotto/trace"
 )
 
-var InitMetrics = metrics.InitMetrics
+var MustInitMetrics = metrics.MustInitMetrics
 var MustInitTracer = trace.MustInit
 
 type HTTPContext = gateway.HTTPContext

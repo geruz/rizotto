@@ -15,7 +15,7 @@ import (
 	"github.com/geruz/rizotto/logger"
 )
 
-func InitMetrics(ctx context.Context, httpAddr string) {
+func MustInitMetrics(ctx context.Context, httpAddr string) {
 	mustInitMeterProvider(ctx)
 	startServer(ctx, httpAddr)
 }
