@@ -43,7 +43,7 @@ type serviceFlags struct {
 func bindServiceFlags(fs *flag.FlagSet) *serviceFlags {
 	f := &serviceFlags{} //nolint:exhaustruct_v5 // filled by the flag package
 
-	fs.StringVar(&f.name, "name", "", "service name: english letters and digits, e.g. Order")
+	fs.StringVar(&f.name, "name", "", "service name: singular, english letters and digits, e.g. Order")
 	fs.StringVar(&f.project, "project", "", `path inside the project the service is added to (default ".")`)
 	fs.StringVar(&f.db, "db", "", `"yes" when the service owns a database table, "no" otherwise`)
 	fs.StringVar(&f.methods, "methods", "",
@@ -111,7 +111,8 @@ func runServiceAdd(args []string, in io.Reader, out io.Writer) error {
 
 // askService collects the answers, skipping the steps already given as flags.
 func askService(flags *serviceFlags, module string, pr *prompter) (serviceSpec, error) {
-	name, err := answer(pr, flags.name, "Service name (english letters and digits, e.g. Order)", "", normalizeName)
+	name, err := answer(pr, flags.name,
+		"Service name (english letters and digits, singular, e.g. Order)", "", normalizeEntityName)
 	if err != nil {
 		return serviceSpec{}, err
 	}

@@ -148,7 +148,7 @@ func methodKeys() string {
 }
 
 func newServiceSpec(module, name, methods string, withDB bool) (serviceSpec, error) {
-	name, err := normalizeName(name)
+	name, err := normalizeEntityName(name)
 	if err != nil {
 		return serviceSpec{}, err
 	}
@@ -323,23 +323,4 @@ func generateService(spec serviceSpec, projectRoot string) ([]string, error) {
 	sort.Strings(written)
 
 	return written, nil
-}
-
-// pluralize is good enough for the entity names the scaffold deals with.
-func pluralize(word string) string {
-	lower := strings.ToLower(word)
-
-	switch {
-	case strings.HasSuffix(lower, "s"), strings.HasSuffix(lower, "x"), strings.HasSuffix(lower, "z"),
-		strings.HasSuffix(lower, "ch"), strings.HasSuffix(lower, "sh"):
-		return word + "es"
-	case strings.HasSuffix(lower, "y") && len(word) > 1 && !isVowel(lower[len(lower)-2]):
-		return word[:len(word)-1] + "ies"
-	default:
-		return word + "s"
-	}
-}
-
-func isVowel(letter byte) bool {
-	return strings.IndexByte("aeiou", letter) >= 0
 }

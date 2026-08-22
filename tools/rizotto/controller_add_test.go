@@ -87,6 +87,21 @@ func Test_runController_RejectsBadInput(t *testing.T) {
 	}
 }
 
+func Test_runController_RejectsAPluralName(t *testing.T) {
+	t.Parallel()
+
+	root := newProjectWithService(t, allMethods)
+	out := &bytes.Buffer{}
+	args := []string{
+		addCommand, projectFlag, root, serviceFlag, serviceLower,
+		nameFlag, pluralName, methodsFlag, allMethods, skipTidyFlag,
+	}
+
+	err := runController(args, strings.NewReader(""), out)
+	must.ErrorIs(t, err, errPluralName)
+	must.StrContains(t, err.Error(), `"`+singularName+`"`)
+}
+
 func Test_runController_NeedsAService(t *testing.T) {
 	t.Parallel()
 

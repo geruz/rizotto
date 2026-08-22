@@ -38,42 +38,14 @@ type project struct {
 }
 
 var (
-	nameRe = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9]*$`)
 	// repoRe matches a host with a domain suffix followed by at least one path element.
 	repoRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9-]*(\.[a-zA-Z0-9-]+)*\.[a-zA-Z]{2,}(/[a-zA-Z0-9._~-]+)+$`)
 
-	errInvalidName = errors.New(
-		"the name must start with an english letter and contain only english letters and digits",
-	)
-	errReservedName = errors.New("the name is a go keyword")
-	errInvalidRepo  = errors.New(
+	errInvalidRepo = errors.New(
 		"expected a repository like github.com/acme/shop, https://github.com/acme/shop.git or git@github.com:acme/shop.git",
 	)
 	errRepoPort = errors.New("a repository with a port cannot be used as a go module path, remove it")
 )
-
-//nolint:gochecknoglobals // the keyword set is static
-var goKeywords = map[string]bool{
-	"break": true, "case": true, "chan": true, "const": true, "continue": true,
-	"default": true, "defer": true, "else": true, "fallthrough": true, "for": true,
-	"func": true, "go": true, "goto": true, "if": true, "import": true,
-	"interface": true, "map": true, "package": true, "range": true, "return": true,
-	"select": true, "struct": true, "switch": true, "type": true, "var": true,
-}
-
-// normalizeName validates the project name, which must be usable as an identifier.
-func normalizeName(raw string) (string, error) {
-	name := strings.TrimSpace(raw)
-	if !nameRe.MatchString(name) {
-		return "", fmt.Errorf("%w: %q", errInvalidName, name)
-	}
-
-	if goKeywords[strings.ToLower(name)] {
-		return "", fmt.Errorf("%w: %q", errReservedName, name)
-	}
-
-	return name, nil
-}
 
 // normalizePath turns the answer of the directory question into an absolute path.
 func normalizePath(raw string) (string, error) {

@@ -128,7 +128,7 @@ func askController(
 		return controllerSpec{}, err
 	}
 
-	name, err := answer(pr, flags.name, "Controller name", service.Entity, normalizeName)
+	name, err := answer(pr, flags.name, "Controller name", service.Entity, normalizeEntityName)
 	if err != nil {
 		return controllerSpec{}, err
 	}

@@ -40,22 +40,11 @@ func Test_normalizeMethods(t *testing.T) {
 	}
 }
 
-func Test_pluralize(t *testing.T) {
+func Test_newServiceSpec_RejectsAPluralName(t *testing.T) {
 	t.Parallel()
 
-	cases := map[string]string{
-		testService + "": "Orders",
-		"order":          "orders",
-		"Category":       "Categories",
-		"Address":        "Addresses",
-		"Box":            "Boxes",
-		"Dish":           "Dishes",
-		"Day":            "Days",
-	}
-
-	for word, expected := range cases {
-		must.Eq(t, expected, pluralize(word), must.Sprintf("word %q", word))
-	}
+	_, err := newServiceSpec(testModule, pluralName, allMethods, true)
+	must.ErrorIs(t, err, errPluralName)
 }
 
 func Test_newServiceSpec(t *testing.T) {

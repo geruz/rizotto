@@ -6,23 +6,6 @@ import (
 	"github.com/shoenig/test/must"
 )
 
-func Test_normalizeName(t *testing.T) {
-	t.Parallel()
-
-	valid := []string{testName, bareWord, "Shop2", "a"}
-	for _, name := range valid {
-		normalized, err := normalizeName(" " + name + " ")
-		must.NoError(t, err, must.Sprintf("name %q", name))
-		must.Eq(t, name, normalized)
-	}
-
-	invalid := []string{"", "2shop", "my-shop", "my_shop", "my shop", "my.shop", "магазин", "shop!", "type"}
-	for _, name := range invalid {
-		_, err := normalizeName(name)
-		must.Error(t, err, must.Sprintf("name %q must be rejected", name))
-	}
-}
-
 func Test_normalizeRepo(t *testing.T) {
 	t.Parallel()
 

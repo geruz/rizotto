@@ -95,7 +95,7 @@ func newControllerSpec(
 	prefix string,
 	private bool,
 ) (controllerSpec, error) {
-	name, err := normalizeName(name)
+	name, err := normalizeEntityName(name)
 	if err != nil {
 		return controllerSpec{}, err
 	}
