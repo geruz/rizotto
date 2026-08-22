@@ -1,0 +1,15 @@
+-- migrate:up
+CREATE TABLE public.user_identities (
+    id BIGSERIAL PRIMARY KEY,
+    user_id BIGINT NOT NULL,
+    provider VARCHAR(32) NOT NULL,
+    external_id VARCHAR(255) NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    UNIQUE (provider, external_id)
+);
+
+CREATE INDEX user_identities_user_id_idx ON public.user_identities (user_id);
+
+-- migrate:down
+DROP TABLE public.user_identities;

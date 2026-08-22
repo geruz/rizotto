@@ -1,0 +1,42 @@
+// Package repository is the only place that talks to the database of the Identity service.
+package repository
+
+import (
+	"context"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"{{.RizottoModule}}/pg"
+
+	"{{.Module}}/{{.Dir}}/repository/db"
+)
+
+type IdentityRepository struct {
+	pg.Repository
+
+	queries *db.Queries
+}
+
+func NewIdentityRepository(pool *pgxpool.Pool) IdentityRepository {
+	return IdentityRepository{
+		Repository: pg.NewRepository(pool),
+		queries:    db.New(pool),
+	}
+}
+
+func (r IdentityRepository) GetIdentity(ctx context.Context, provider, externalID string) (db.UserIdentity, error) {
+	return r.queries.GetIdentity(ctx, db.GetIdentityParams{
+		Provider:   provider,
+		ExternalID: externalID,
+	})
+}
+
+func (r IdentityRepository) CreateIdentity(
+	ctx context.Context, userID int64, provider, externalID string,
+) (db.UserIdentity, error) {
+	return r.queries.CreateIdentity(ctx, db.CreateIdentityParams{
+		UserID:     userID,
+		Provider:   provider,
+		ExternalID: externalID,
+	})
+}

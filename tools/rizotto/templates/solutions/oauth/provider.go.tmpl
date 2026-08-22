@@ -1,0 +1,204 @@
+// Package oauth talks to the OAuth providers of {{.Module}}: it builds the URL the
+// caller is sent to, exchanges the code they come back with for an access token
+// and asks the provider who that token belongs to.
+package oauth
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net/http"
+	"net/url"
+	"strconv"
+	"strings"
+	"time"
+
+	"{{.RizottoModule}}/settings/env"
+)
+
+// timeout bounds both calls to the provider, so a hanging provider cannot hold a
+// request of ours open.
+const timeout = 10 * time.Second
+
+var (
+	ErrUnknownProvider = errors.New("unknown OAuth provider")
+	ErrExchangeFailed  = errors.New("the provider refused the authorization code")
+	ErrUserInfoFailed  = errors.New("the provider refused to describe the caller")
+	ErrNoExternalID    = errors.New("the provider answered no user id")
+)
+
+// Identity is who the provider says the caller is.
+type Identity struct {
+	// Provider is the key of the provider, e.g. {{(index .Providers 0).Key}}.
+	Provider string
+	// ExternalID is the id of the caller with that provider. Together with
+	// Provider it is what identifies a user of the project.
+	ExternalID string
+	Email      string
+	Name       string
+}
+
+// Provider is one OAuth provider and the credentials it was configured with.
+type Provider struct {
+	Key          string
+	authorizeURL string
+	tokenURL     string
+	userInfoURL  string
+	scope        string
+	idField      string
+	emailField   string
+	nameField    string
+	clientID     string
+	clientSecret string
+}
+
+// MustLoadProviders reads the credentials of every configured provider. It panics
+// when one is missing, so a misconfigured deployment fails at startup rather than
+// at the first login.
+//
+// The three endpoints default to the real ones and can be pointed elsewhere with
+// <PREFIX>_AUTHORIZE_URL, _TOKEN_URL and _USER_INFO_URL, which is what the tests
+// and a staging environment with a fake provider do.
+func MustLoadProviders() map[string]Provider {
+	return map[string]Provider{
+{{- range .Providers}}
+		"{{.Key}}": {
+			Key:          "{{.Key}}",
+			authorizeURL: env.GetStringValue("{{.EnvPrefix}}_AUTHORIZE_URL", "{{.AuthorizeURL}}"),
+			tokenURL:     env.GetStringValue("{{.EnvPrefix}}_TOKEN_URL", "{{.TokenURL}}"),
+			userInfoURL:  env.GetStringValue("{{.EnvPrefix}}_USER_INFO_URL", "{{.UserInfoURL}}"),
+			scope:        "{{.Scope}}",
+			idField:      "{{.IDField}}",
+			emailField:   "{{.EmailField}}",
+			nameField:    "{{.NameField}}",
+			clientID:     env.MustGetStringValue("{{.EnvPrefix}}_CLIENT_ID"),
+			clientSecret: env.MustGetStringValue("{{.EnvPrefix}}_CLIENT_SECRET"),
+		},
+{{- end}}
+	}
+}
+
+// RedirectURI is where the provider sends the caller back, which has to be the
+// same value in both legs of the flow or the provider rejects the exchange.
+func RedirectURI(providerKey string) string {
+	base := strings.TrimSuffix(env.MustGetStringValue("OAUTH_REDIRECT_BASE_URL"), "/")
+
+	return base + "/api/v1/auth/" + providerKey + "/callback"
+}
+
+// AuthorizeURL is where the caller logs in. The state travels with them and is
+// checked when they come back, which is what makes the callback unforgeable.
+func (p Provider) AuthorizeURL(state string) string {
+	query := url.Values{}
+	query.Set("client_id", p.clientID)
+	query.Set("redirect_uri", RedirectURI(p.Key))
+	query.Set("response_type", "code")
+	query.Set("scope", p.scope)
+	query.Set("state", state)
+
+	return p.authorizeURL + "?" + query.Encode()
+}
+
+// Exchange turns the authorization code into an access token.
+func (p Provider) Exchange(ctx context.Context, code string) (string, error) {
+	form := url.Values{}
+	form.Set("client_id", p.clientID)
+	form.Set("client_secret", p.clientSecret)
+	form.Set("code", code)
+	form.Set("redirect_uri", RedirectURI(p.Key))
+	form.Set("grant_type", "authorization_code")
+
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, p.tokenURL, strings.NewReader(form.Encode()))
+	if err != nil {
+		return "", fmt.Errorf("build the token request: %w", err)
+	}
+
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	// GitHub answers form encoded unless asked otherwise.
+	request.Header.Set("Accept", "application/json")
+
+	var answer struct {
+		AccessToken string `json:"access_token"`
+	}
+
+	err = send(ctx, request, &answer)
+	if err != nil {
+		return "", fmt.Errorf("%w: %w", ErrExchangeFailed, err)
+	}
+
+	if answer.AccessToken == "" {
+		return "", ErrExchangeFailed
+	}
+
+	return answer.AccessToken, nil
+}
+
+// UserInfo asks the provider who the access token belongs to.
+func (p Provider) UserInfo(ctx context.Context, accessToken string) (Identity, error) {
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, p.userInfoURL, nil)
+	if err != nil {
+		return Identity{}, fmt.Errorf("build the user info request: %w", err)
+	}
+
+	request.Header.Set("Authorization", "Bearer "+accessToken)
+	request.Header.Set("Accept", "application/json")
+
+	fields := map[string]any{}
+
+	err = send(ctx, request, &fields)
+	if err != nil {
+		return Identity{}, fmt.Errorf("%w: %w", ErrUserInfoFailed, err)
+	}
+
+	externalID := field(fields, p.idField)
+	if externalID == "" {
+		return Identity{}, ErrNoExternalID
+	}
+
+	return Identity{
+		Provider:   p.Key,
+		ExternalID: externalID,
+		Email:      field(fields, p.emailField),
+		Name:       field(fields, p.nameField),
+	}, nil
+}
+
+// send performs the request and decodes a successful answer into target.
+func send(ctx context.Context, request *http.Request, target any) error {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	response, err := http.DefaultClient.Do(request.WithContext(ctx))
+	if err != nil {
+		return fmt.Errorf("call the provider: %w", err)
+	}
+
+	defer func() { _ = response.Body.Close() }()
+
+	if response.StatusCode != http.StatusOK {
+		return fmt.Errorf("the provider answered %d", response.StatusCode) //nolint:err113 // the status is the detail
+	}
+
+	err = json.NewDecoder(response.Body).Decode(target)
+	if err != nil {
+		return fmt.Errorf("decode the answer of the provider: %w", err)
+	}
+
+	return nil
+}
+
+// field reads one field of the user info answer as a string. Providers disagree on
+// the type of a user id: some answer a string, others a number.
+func field(fields map[string]any, name string) string {
+	switch value := fields[name].(type) {
+	case string:
+		return value
+	case float64:
+		return strconv.FormatInt(int64(value), 10)
+	case nil:
+		return ""
+	default:
+		return fmt.Sprint(value)
+	}
+}

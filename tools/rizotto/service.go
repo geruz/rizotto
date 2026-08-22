@@ -311,7 +311,7 @@ func generateService(spec serviceSpec, projectRoot string) ([]string, error) {
 		return written, nil
 	}
 
-	changed, err := addSqlcEntry(projectRoot, spec)
+	changed, err := addServiceSqlcEntry(projectRoot, spec)
 	if err != nil {
 		return nil, err
 	}

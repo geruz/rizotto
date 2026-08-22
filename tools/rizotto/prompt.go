@@ -21,15 +21,32 @@ var (
 type prompter struct {
 	in  *bufio.Reader
 	out io.Writer
+	// silent answers every question with its default instead of asking. It is how
+	// a solution installed as a dependency is given no chance to block, since
+	// nobody typed flags for it.
+	silent bool
 }
 
 func newPrompter(in io.Reader, out io.Writer) *prompter {
-	return &prompter{in: bufio.NewReader(in), out: out}
+	return &prompter{in: bufio.NewReader(in), out: out, silent: false}
+}
+
+// newSilentPrompter answers with the defaults and never reads stdin.
+func newSilentPrompter(out io.Writer) *prompter {
+	return &prompter{in: bufio.NewReader(strings.NewReader("")), out: out, silent: true}
 }
 
 // ask prints "question [hint]: " and returns the trimmed answer, or fallback when
 // the author just hits enter.
 func (p *prompter) ask(question string, hint string, fallback string) (string, error) {
+	if p.silent {
+		if fallback == "" {
+			return "", errNoInput
+		}
+
+		return fallback, nil
+	}
+
 	suffix := ": "
 	if hint != "" {
 		suffix = " [" + hint + "]: "

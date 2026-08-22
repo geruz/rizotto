@@ -1,0 +1,79 @@
+// Package userapi answers who the caller is and lets them log out.
+package userapi
+
+import (
+	"{{.RizottoModule}}"
+	"{{.RizottoModule}}/gateway"
+
+	"{{.APIImport}}"
+	user "{{.ClientImport}}"
+)
+
+type UserController struct {
+	gateway.Controller
+
+	deleteSessionRPC user.DeleteSessionRPC
+}
+
+func NewUserController() UserController {
+	client := user.BindClient()
+	ctrl := UserController{
+		Controller:       rizotto.Controller{},
+		deleteSessionRPC: client.DeleteSessionRPC,
+	}
+	ctrl.AddRoutes(
+		gateway.JSONMethod("GET /api/v1/me", api.AuthArea, ctrl.me),
+		gateway.JSONMethod("POST /api/v1/logout", api.PublicArea, ctrl.logout),
+	)
+
+	return ctrl
+}
+
+// Errors.
+//
+//nolint:gochecknoglobals // the errors of a controller are declared once
+var internalError = gateway.NewInternalError()
+
+type (
+	MeRequest     struct{}
+	LogoutRequest struct{}
+)
+
+type Me struct {
+	ID    int    `json:"id"`
+	Email string `json:"email"`
+	Name  string `json:"name"`
+}
+
+type LoggedOut struct {
+	LoggedOut bool `json:"loggedOut"`
+}
+
+// me answers who the caller is. AuthArea already rejected everybody else.
+func (ctrl UserController) me(ctx api.AuthHTTPContext, _ MeRequest) (Me, gateway.HTTPError) {
+	return Me{
+		ID:    ctx.User.ID,
+		Email: ctx.User.Email,
+		Name:  ctx.User.Name,
+	}, nil
+}
+
+// logout drops the session, both here and on the caller side. It is a public
+// route: a caller whose session is already gone is logged out, not rejected.
+func (ctrl UserController) logout(
+	ctx api.PublicHTTPContext, _ LogoutRequest,
+) (LoggedOut, gateway.HTTPError) {
+	sessionToken, found := api.SessionToken(ctx.HTTPContext)
+	if !found {
+		return LoggedOut{LoggedOut: true}, nil
+	}
+
+	deleted, err := ctrl.deleteSessionRPC(ctx, user.DeleteSessionRequest{Token: sessionToken})
+	if err != nil {
+		return LoggedOut{LoggedOut: false}, gateway.MapError(err).Others(internalError)
+	}
+
+	api.DropSession(ctx)
+
+	return LoggedOut{LoggedOut: deleted.Deleted}, nil
+}

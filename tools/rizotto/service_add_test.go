@@ -14,7 +14,6 @@ const (
 	projectFlag  = "-project"
 	dbFlag       = "-db"
 	methodsFlag  = "-methods"
-	addCommand   = "add"
 	testService  = "Order"
 	otherService = "Category"
 	// serviceLower is the directory testService lands in.
@@ -22,8 +21,9 @@ const (
 	// unknownSubcommand is not a subcommand of service or controller.
 	unknownSubcommand = "remove"
 
-	caseInvalidName = "invalid name"
-	casePositional  = "positional arguments"
+	caseInvalidName       = "invalid name"
+	casePositional        = "positional arguments"
+	caseMissingSubcommand = "missing subcommand"
 
 	// pluralName and singularName are the pair the plural check is exercised
 	// with; boxName and addressName are the awkward ones pluralize has rules for.
@@ -104,12 +104,12 @@ func Test_runService_RejectsBadInput(t *testing.T) {
 	root := newProjectDir(t)
 
 	cases := map[string][]string{
-		"missing subcommand": {},
-		"unknown subcommand": {unknownSubcommand, nameFlag, testService},
-		caseInvalidName:      {addCommand, projectFlag, root, nameFlag, invalidName, dbFlag, "no", methodsFlag, allMethods},
-		"invalid db answer":  {addCommand, projectFlag, root, nameFlag, testService, dbFlag, "maybe"},
-		"invalid methods":    {addCommand, projectFlag, root, nameFlag, testService, dbFlag, "no", methodsFlag, "drop"},
-		casePositional:       {addCommand, testService},
+		caseMissingSubcommand: {},
+		"unknown subcommand":  {unknownSubcommand, nameFlag, testService},
+		caseInvalidName:       {addCommand, projectFlag, root, nameFlag, invalidName, dbFlag, "no", methodsFlag, allMethods},
+		"invalid db answer":   {addCommand, projectFlag, root, nameFlag, testService, dbFlag, "maybe"},
+		"invalid methods":     {addCommand, projectFlag, root, nameFlag, testService, dbFlag, "no", methodsFlag, "drop"},
+		casePositional:        {addCommand, testService},
 	}
 
 	for name, args := range cases {

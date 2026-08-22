@@ -70,7 +70,7 @@ func Test_runController_RejectsBadInput(t *testing.T) {
 	valid := []string{addCommand, projectFlag, root, serviceFlag, serviceLower}
 
 	cases := map[string][]string{
-		"missing subcommand":  {},
+		caseMissingSubcommand: {},
 		"unknown subcommand":  {unknownSubcommand},
 		"unknown service":     {addCommand, projectFlag, root, serviceFlag, "invoice"},
 		caseInvalidName:       append(append([]string{}, valid...), nameFlag, invalidName),

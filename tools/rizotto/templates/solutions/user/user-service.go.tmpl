@@ -1,0 +1,180 @@
+// Package usersrv owns the users of {{.Module}} and their sessions.
+package usersrv
+
+import (
+	"context"
+	"time"
+
+	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"{{.RizottoModule}}/bb"
+	"{{.RizottoModule}}/crypto/token"
+	"{{.RizottoModule}}/pg"
+	"{{.RizottoModule}}/settings/env"
+	"{{.RizottoModule}}/validators"
+
+	"{{.Module}}/{{.Dir}}/repository"
+	"{{.Module}}/{{.Dir}}/repository/db"
+	user "{{.ClientImport}}"
+)
+
+const (
+	// sessionTokenLength is the number of hex characters of a session token: 32
+	// bytes of randomness, which is more than a caller can guess.
+	sessionTokenLength = 64
+	// defaultSessionTTLHours is used when SESSION_TTL_HOURS is not set.
+	defaultSessionTTLHours = 720
+)
+
+type UserService struct {
+	repo repository.UserRepository
+	ttl  time.Duration
+}
+
+func NewUserService(pool *pgxpool.Pool) UserService {
+	hours := env.GetIntValue("SESSION_TTL_HOURS", defaultSessionTTLHours)
+
+	return UserService{
+		repo: repository.NewUserRepository(pool),
+		ttl:  time.Duration(hours) * time.Hour,
+	}
+}
+
+func (srv UserService) GetUserRPC(ctx context.Context, req user.GetUserRequest) (user.User, bb.ServiceError) {
+	if req.UserID <= 0 {
+		return user.User{}, bb.NewInvalidRequestError("invalid user id")
+	}
+
+	dbUser, err := srv.repo.GetUserByID(ctx, int64(req.UserID))
+	if err != nil {
+		if pg.IsNotFoundError(err) {
+			return user.User{}, bb.NewNotFoundError("user not found")
+		}
+
+		return user.User{}, bb.NewInternalError("failed to get user", err)
+	}
+
+	return toUser(dbUser), nil
+}
+
+func (srv UserService) CreateUserRPC(ctx context.Context, req user.CreateUserRequest) (user.User, bb.ServiceError) {
+	if !validators.Email(req.Email) {
+		return user.User{}, bb.NewInvalidRequestError("invalid email")
+	}
+
+	if req.Name == "" {
+		return user.User{}, bb.NewInvalidRequestError("name is required")
+	}
+
+	dbUser, err := srv.repo.CreateUser(ctx, req.Email, req.Name)
+	if err != nil {
+		return user.User{}, bb.NewInternalError("failed to create the user", err)
+	}
+
+	return toUser(dbUser), nil
+}
+
+// CreateSessionRPC issues a session token. It is the only answer carrying the
+// token itself: only its fingerprint reaches the database.
+func (srv UserService) CreateSessionRPC(
+	ctx context.Context, req user.CreateSessionRequest,
+) (user.Session, bb.ServiceError) {
+	if req.UserID <= 0 {
+		return user.Session{}, bb.NewInvalidRequestError("invalid user id")
+	}
+
+	plain, err := token.Secure(sessionTokenLength)
+	if err != nil {
+		return user.Session{}, bb.NewInternalError("failed to generate a session token", err)
+	}
+
+	expiresAt := time.Now().UTC().Add(srv.ttl)
+
+	session, err := srv.repo.CreateSession(ctx, token.Hash(plain), int64(req.UserID), timestamp(expiresAt))
+	if err != nil {
+		return user.Session{}, bb.NewInternalError("failed to create the session", err)
+	}
+
+	dbUser, err := srv.repo.GetUserByID(ctx, session.UserID)
+	if err != nil {
+		return user.Session{}, bb.NewInternalError("failed to read the user of the session", err)
+	}
+
+	return user.Session{
+		Token:     plain,
+		ExpiresAt: session.ExpiresAt.Time,
+		User:      toUser(dbUser),
+	}, nil
+}
+
+// GetSessionRPC authenticates a token. An unknown or expired token is not a
+// not-found: the caller is simply not authenticated.
+func (srv UserService) GetSessionRPC(
+	ctx context.Context, req user.GetSessionRequest,
+) (user.Session, bb.ServiceError) {
+	if req.Token == "" {
+		return user.Session{}, bb.NewUnauthorizedError("no session token")
+	}
+
+	row, err := srv.repo.GetSession(ctx, token.Hash(req.Token))
+	if err != nil {
+		if pg.IsNotFoundError(err) {
+			return user.Session{}, bb.NewUnauthorizedError("unknown session")
+		}
+
+		return user.Session{}, bb.NewInternalError("failed to get the session", err)
+	}
+
+	if !row.ExpiresAt.Time.After(time.Now().UTC()) {
+		return user.Session{}, bb.NewUnauthorizedError("the session has expired")
+	}
+
+	return user.Session{
+		Token:     "",
+		ExpiresAt: row.ExpiresAt.Time,
+		User: user.User{
+			ID:    int(row.ID),
+			Email: row.Email,
+			Name:  row.Name,
+		},
+	}, nil
+}
+
+// DeleteSessionRPC logs the caller out. Deleting a session nobody has is not an
+// error: the caller ends up logged out either way.
+func (srv UserService) DeleteSessionRPC(
+	ctx context.Context, req user.DeleteSessionRequest,
+) (user.DeletedSession, bb.ServiceError) {
+	if req.Token == "" {
+		return user.DeletedSession{Deleted: false}, nil
+	}
+
+	_, err := srv.repo.DeleteSession(ctx, token.Hash(req.Token))
+	if err != nil {
+		if pg.IsNotFoundError(err) {
+			return user.DeletedSession{Deleted: false}, nil
+		}
+
+		return user.DeletedSession{Deleted: false}, bb.NewInternalError("failed to delete the session", err)
+	}
+
+	return user.DeletedSession{Deleted: true}, nil
+}
+
+func toUser(dbUser db.User) user.User {
+	return user.User{
+		ID:    int(dbUser.ID),
+		Email: dbUser.Email,
+		Name:  dbUser.Name,
+	}
+}
+
+// timestamp keeps the database on UTC, as every other table of the project does.
+func timestamp(value time.Time) pgtype.Timestamp {
+	return pgtype.Timestamp{
+		Time:             value.UTC(),
+		InfinityModifier: 0,
+		Valid:            true,
+	}
+}

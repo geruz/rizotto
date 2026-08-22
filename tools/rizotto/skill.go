@@ -19,6 +19,8 @@ const (
 	projectSkill = "rizotto"
 	// repositorySkill is the document behind "rizotto repository skill".
 	repositorySkill = "repository"
+	// solutionSkill is the document behind "rizotto solution skill".
+	solutionSkill = "solution"
 )
 
 const repositoryUsage = `Usage:

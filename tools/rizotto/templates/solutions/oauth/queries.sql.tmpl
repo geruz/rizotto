@@ -1,0 +1,10 @@
+-- name: GetIdentity :one
+SELECT *
+FROM public.user_identities
+WHERE provider = $1
+    AND external_id = $2;
+
+-- name: CreateIdentity :one
+INSERT INTO public.user_identities (user_id, provider, external_id)
+VALUES ($1, $2, $3)
+RETURNING *;

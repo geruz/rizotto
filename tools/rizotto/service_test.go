@@ -233,12 +233,12 @@ func Test_addSqlcEntry_AppendsAndSkipsDuplicates(t *testing.T) {
 	must.NoError(t, err)
 
 	for _, spec := range []serviceSpec{first, second} {
-		changed, addErr := addSqlcEntry(root, spec)
+		changed, addErr := addServiceSqlcEntry(root, spec)
 		must.NoError(t, addErr)
 		must.True(t, changed)
 	}
 
-	changed, err := addSqlcEntry(root, first)
+	changed, err := addServiceSqlcEntry(root, first)
 	must.NoError(t, err)
 	must.False(t, changed, must.Sprint("a service must be registered in sqlc.yaml only once"))
 
@@ -280,7 +280,7 @@ sql:
 	spec, err := newServiceSpec(testModule, testService, "read", true)
 	must.NoError(t, err)
 
-	_, err = addSqlcEntry(root, spec)
+	_, err = addServiceSqlcEntry(root, spec)
 	must.NoError(t, err)
 
 	updated := readFile(t, root, sqlcConfigFile)

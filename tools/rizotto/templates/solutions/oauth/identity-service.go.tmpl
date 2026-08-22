@@ -1,0 +1,82 @@
+// Package identitysrv remembers which external account belongs to which user of
+// {{.Module}}. The users themselves belong to the user service.
+package identitysrv
+
+import (
+	"context"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"{{.RizottoModule}}/bb"
+	"{{.RizottoModule}}/pg"
+
+	identity "{{.ClientImport}}"
+	"{{.Module}}/{{.Dir}}/repository"
+	"{{.Module}}/{{.Dir}}/repository/db"
+)
+
+type IdentityService struct {
+	repo repository.IdentityRepository
+}
+
+func NewIdentityService(pool *pgxpool.Pool) IdentityService {
+	return IdentityService{repo: repository.NewIdentityRepository(pool)}
+}
+
+func (srv IdentityService) GetIdentityRPC(
+	ctx context.Context, req identity.GetIdentityRequest,
+) (identity.Identity, bb.ServiceError) {
+	if req.Provider == "" || req.ExternalID == "" {
+		return identity.Identity{}, bb.NewInvalidRequestError("provider and external id are required")
+	}
+
+	found, err := srv.repo.GetIdentity(ctx, req.Provider, req.ExternalID)
+	if err != nil {
+		if pg.IsNotFoundError(err) {
+			return identity.Identity{}, bb.NewNotFoundError("identity not found")
+		}
+
+		return identity.Identity{}, bb.NewInternalError("failed to get the identity", err)
+	}
+
+	return toIdentity(found), nil
+}
+
+// CreateIdentityRPC links an external account to a user. Two logins of the same
+// new identity can race here; the unique index makes one of them lose, and
+// reading the winner back is the answer.
+func (srv IdentityService) CreateIdentityRPC(
+	ctx context.Context, req identity.CreateIdentityRequest,
+) (identity.Identity, bb.ServiceError) {
+	if req.Provider == "" || req.ExternalID == "" {
+		return identity.Identity{}, bb.NewInvalidRequestError("provider and external id are required")
+	}
+
+	if req.UserID <= 0 {
+		return identity.Identity{}, bb.NewInvalidRequestError("invalid user id")
+	}
+
+	created, err := srv.repo.CreateIdentity(ctx, int64(req.UserID), req.Provider, req.ExternalID)
+	if err == nil {
+		return toIdentity(created), nil
+	}
+
+	if !pg.IsDuplicateError(err) {
+		return identity.Identity{}, bb.NewInternalError("failed to create the identity", err)
+	}
+
+	existing, err := srv.repo.GetIdentity(ctx, req.Provider, req.ExternalID)
+	if err != nil {
+		return identity.Identity{}, bb.NewInternalError("failed to read the identity back", err)
+	}
+
+	return toIdentity(existing), nil
+}
+
+func toIdentity(row db.UserIdentity) identity.Identity {
+	return identity.Identity{
+		UserID:     int(row.UserID),
+		Provider:   row.Provider,
+		ExternalID: row.ExternalID,
+	}
+}

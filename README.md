@@ -140,6 +140,75 @@ The routes follow the chosen CRUD methods:
 | `-force`     | write into an existing controller directory               |
 | `-skip-tidy` | do not run `go mod tidy` in the project                   |
 
+### rizotto solution add
+
+Installs a whole feature rather than a layer. `service add` writes one service and
+`controller add` writes one controller; a solution writes every layer the feature
+is made of, and is opinionated about how they fit together:
+
+```sh
+rizotto solution list
+rizotto solution add oauth -providers google,github
+# or from this repo
+task solution:add -- oauth -project ~/projects/my-app -providers google
+```
+
+The point is the features whose shape is not really a choice. Everybody's users
+table looks the same, and getting the details of an OAuth flow wrong is expensive,
+so these are the reviewed answer rather than one assembled per project.
+
+**`user`** — the users of the project and their sessions:
+
+    services/user/            the user service: users and sessions
+    api/auth-area.go          AuthArea, which answers 401 before the handler runs
+    api/user-api/             GET  /api/v1/me
+                              POST /api/v1/logout
+
+**`oauth`** — logging in through a provider, built on `user`:
+
+    services/identity/        which external account belongs to which user
+    services/identity/oauth/  the calls to the provider
+    api/oauth-api/            GET /api/v1/auth/{provider}/start
+                              GET /api/v1/auth/{provider}/callback
+
+Only the fingerprint of a session token is stored, never the token, and a callback
+whose state does not match the one we sent is refused. `rizotto solution skill
+user` and `... skill oauth` cover the tables, the flow and the configuration.
+
+### Solutions built on solutions
+
+A solution declares what it is built on, and those are installed first:
+
+```sh
+rizotto solution add oauth               # installs "user" too, when it is missing
+```
+
+A dependency the project already has is left alone. The flags only ever reach the
+solution that was named, so a dependency is installed with its defaults and never
+asks anything — install it by name first when the defaults are not what you want:
+
+```sh
+rizotto solution add user -session bearer
+rizotto solution add oauth -providers github
+```
+
+### What a solution never does
+
+It never edits `server.go` or `.env.example`, and never overwrites a file the
+project already has: registering a service is one line that belongs to the author,
+so the command finishes by printing exactly what to add and where. Files it would
+overwrite are listed and refused unless `-force` says otherwise.
+
+| flag         | meaning                                                        |
+| ------------ | -------------------------------------------------------------- |
+| `-project`   | path inside the project the solution is added to               |
+| `-force`     | write the files even when the project already has some of them |
+| `-skip-tidy` | do not run `go mod tidy` in the project                        |
+
+`user` additionally takes `-session` (`cookie` for a browser application, `bearer`
+for a native client) and `oauth` takes `-providers` (`google`, `github`). Writing a
+new solution is described by `rizotto solution skill`.
+
 ### rizotto skill
 
 Prints the documentation of the framework to the console, as markdown:
@@ -148,6 +217,9 @@ Prints the documentation of the framework to the console, as markdown:
 rizotto skill              # what a rizotto project is made of: layout, bootstrap, settings, tasks
 rizotto service skill      # services in detail: contract, genbind bindings, bb errors, repository, sqlc, migrations
 rizotto controller skill   # controllers in detail: routing, request objects, contexts, error mapping, route tests
+rizotto solution skill     # what a solution is, how one is installed and how to write another
+rizotto solution skill user  # users and sessions in detail
+rizotto solution skill oauth # the OAuth login in detail: tables, flow, configuration
 ```
 
 The texts live in [tools/rizotto/skills/](tools/rizotto/skills/) and are embedded in

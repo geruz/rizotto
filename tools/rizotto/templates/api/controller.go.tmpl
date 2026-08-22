@@ -4,21 +4,22 @@ package api
 import "{{.RizottoModule}}"
 
 // PrivateArea builds the context of the routes that require an authenticated user.
-// Replace the hardcoded user with the real authentication of the project.
-func PrivateArea(ctx rizotto.HTTPContext) UserHTTPContext {
+// Replace the hardcoded user with the real authentication of the project: answer
+// an error instead and the route rejects the request before the handler runs.
+func PrivateArea(ctx rizotto.HTTPContext) (UserHTTPContext, rizotto.HTTPError) {
 	return UserHTTPContext{
 		HTTPContext: ctx,
 		User: CurrentUser{
 			Name: "anonymous",
 		},
-	}
+	}, nil
 }
 
 // PublicArea builds the context of the routes open to everybody.
-func PublicArea(ctx rizotto.HTTPContext) PublicHTTPContext {
+func PublicArea(ctx rizotto.HTTPContext) (PublicHTTPContext, rizotto.HTTPError) {
 	return PublicHTTPContext{
 		HTTPContext: ctx,
-	}
+	}, nil
 }
 
 type CurrentUser struct {

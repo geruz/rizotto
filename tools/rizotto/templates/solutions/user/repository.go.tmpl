@@ -1,0 +1,55 @@
+// Package repository is the only place that talks to the database of the User service.
+package repository
+
+import (
+	"context"
+
+	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"{{.RizottoModule}}/pg"
+
+	"{{.Module}}/{{.Dir}}/repository/db"
+)
+
+type UserRepository struct {
+	pg.Repository
+
+	queries *db.Queries
+}
+
+func NewUserRepository(pool *pgxpool.Pool) UserRepository {
+	return UserRepository{
+		Repository: pg.NewRepository(pool),
+		queries:    db.New(pool),
+	}
+}
+
+func (r UserRepository) GetUserByID(ctx context.Context, id int64) (db.User, error) {
+	return r.queries.GetUser(ctx, id)
+}
+
+func (r UserRepository) CreateUser(ctx context.Context, email, name string) (db.User, error) {
+	return r.queries.CreateUser(ctx, db.CreateUserParams{
+		Email: email,
+		Name:  name,
+	})
+}
+
+func (r UserRepository) CreateSession(
+	ctx context.Context, tokenHash string, userID int64, expiresAt pgtype.Timestamp,
+) (db.Session, error) {
+	return r.queries.CreateSession(ctx, db.CreateSessionParams{
+		TokenHash: tokenHash,
+		UserID:    userID,
+		ExpiresAt: expiresAt,
+	})
+}
+
+func (r UserRepository) GetSession(ctx context.Context, tokenHash string) (db.GetSessionRow, error) {
+	return r.queries.GetSession(ctx, tokenHash)
+}
+
+func (r UserRepository) DeleteSession(ctx context.Context, tokenHash string) (string, error) {
+	return r.queries.DeleteSession(ctx, tokenHash)
+}

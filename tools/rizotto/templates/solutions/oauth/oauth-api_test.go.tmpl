@@ -1,0 +1,220 @@
+package oauthapi
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/shoenig/test/must"
+
+	"{{.RizottoModule}}/bb"
+	"{{.RizottoModule}}/documentation/openapi"
+	"{{.RizottoModule}}/testutils/api"
+
+	identity "{{.ClientImport}}"
+	"{{.Module}}/api/doc"
+	user "{{.UserClientImport}}"
+)
+
+const (
+	testProvider   = "{{(index .Providers 0).Key}}"
+	testExternalID = "external-1"
+	testEmail      = "person@example.com"
+	testName       = "A Person"
+	testSession    = "a-valid-session-token"
+	testAppURL     = "http://localhost:3000"
+	testUserID     = 1
+	// knownExternalID already belongs to a user, so no user is created for it.
+	knownExternalID = "external-known"
+)
+
+// TestMain points the solution at a fake provider and registers stub services, so
+// the tests exercise the real routes without leaving the process.
+func TestMain(m *testing.M) {
+	provider := httptest.NewServer(http.HandlerFunc(serveProvider))
+	defer provider.Close()
+
+	variables := map[string]string{
+		"OAUTH_REDIRECT_BASE_URL": "http://localhost:9090",
+		"APP_LOGIN_REDIRECT_URL":  testAppURL,
+	}
+{{range .Providers}}
+	variables["{{.EnvPrefix}}_CLIENT_ID"] = "test-client"
+	variables["{{.EnvPrefix}}_CLIENT_SECRET"] = "test-secret"
+	variables["{{.EnvPrefix}}_AUTHORIZE_URL"] = provider.URL + "/authorize"
+	variables["{{.EnvPrefix}}_TOKEN_URL"] = provider.URL + "/token"
+	variables["{{.EnvPrefix}}_USER_INFO_URL"] = provider.URL + "/userinfo"
+{{end}}
+	for key, value := range variables {
+		if err := os.Setenv(key, value); err != nil {
+			panic(err)
+		}
+	}
+
+	identity.RegisterServer(stubIdentityService{})
+	user.RegisterServer(stubUserService{})
+
+	os.Exit(m.Run())
+}
+
+// serveProvider is the fake OAuth provider: it hands out a token and describes the
+// caller it belongs to.
+func serveProvider(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	switch {
+	case strings.HasSuffix(r.URL.Path, "/token"):
+		_ = json.NewEncoder(w).Encode(map[string]string{"access_token": "a-provider-token"})
+	case strings.HasSuffix(r.URL.Path, "/userinfo"):
+		// The fields are assigned rather than listed, because two providers may
+		// well name the same one.
+		fields := map[string]string{}
+{{range .Providers}}
+		fields["{{.IDField}}"] = testExternalID
+		fields["{{.EmailField}}"] = testEmail
+		fields["{{.NameField}}"] = testName
+{{end}}
+		_ = json.NewEncoder(w).Encode(fields)
+	default:
+		w.WriteHeader(http.StatusNotFound)
+	}
+}
+
+type stubIdentityService struct{}
+
+func (stubIdentityService) GetIdentityRPC(
+	_ context.Context, req identity.GetIdentityRequest,
+) (identity.Identity, bb.ServiceError) {
+	if req.ExternalID != knownExternalID {
+		return identity.Identity{}, bb.NewNotFoundError("identity not found")
+	}
+
+	return identity.Identity{UserID: testUserID, Provider: req.Provider, ExternalID: req.ExternalID}, nil
+}
+
+func (stubIdentityService) CreateIdentityRPC(
+	_ context.Context, req identity.CreateIdentityRequest,
+) (identity.Identity, bb.ServiceError) {
+	return identity.Identity{UserID: req.UserID, Provider: req.Provider, ExternalID: req.ExternalID}, nil
+}
+
+type stubUserService struct{}
+
+func (stubUserService) GetUserRPC(_ context.Context, req user.GetUserRequest) (user.User, bb.ServiceError) {
+	return user.User{ID: req.UserID, Email: testEmail, Name: testName}, nil
+}
+
+func (stubUserService) CreateUserRPC(_ context.Context, req user.CreateUserRequest) (user.User, bb.ServiceError) {
+	return user.User{ID: testUserID, Email: req.Email, Name: req.Name}, nil
+}
+
+func (stubUserService) CreateSessionRPC(
+	_ context.Context, req user.CreateSessionRequest,
+) (user.Session, bb.ServiceError) {
+	return user.Session{
+		Token:     testSession,
+		ExpiresAt: time.Now().UTC().Add(time.Hour),
+		User:      user.User{ID: req.UserID, Email: testEmail, Name: testName},
+	}, nil
+}
+
+func (stubUserService) GetSessionRPC(
+	_ context.Context, _ user.GetSessionRequest,
+) (user.Session, bb.ServiceError) {
+	return user.Session{}, bb.NewUnauthorizedError("unknown session")
+}
+
+func (stubUserService) DeleteSessionRPC(
+	_ context.Context, _ user.DeleteSessionRequest,
+) (user.DeletedSession, bb.ServiceError) {
+	return user.DeletedSession{Deleted: true}, nil
+}
+
+func Test_StartRoute(t *testing.T) {
+	t.Parallel()
+
+	api.GroupRouteTests(t, "GET /api/v1/auth/{{"{"}}provider}/start", NewOAuthController).
+		Documentation(
+			doc.ApiPublicDocumentationV1,
+			openapi.Description("Sends the caller to their OAuth provider to log in."),
+		).
+		Case("known provider", testStartCase).
+		Case("unknown provider", testStartUnknownProviderCase)
+}
+
+func testStartCase(t *testing.T, ctr OAuthController, cfg api.RequestConfiguration) {
+	t.Helper()
+
+	// act
+	call := api.TestAPICall(t, ctr, ctr.start, cfg.WithPathVar("provider", testProvider)).
+		ExpectedRequest(t, StartRequest{Provider: testProvider})
+
+	// assert: the caller is sent to the provider, carrying a state we remembered
+	answer := call.Answer()
+	must.Eq(t, http.StatusFound, answer.StatusCode)
+	must.StrContains(t, answer.Header.Get("Location"), "/authorize")
+
+	state, found := call.AnswerCookie(StateCookieName)
+	must.True(t, found, must.Sprint("the state cookie must be set"))
+	must.StrContains(t, answer.Header.Get("Location"), "state="+state.Value)
+}
+
+func testStartUnknownProviderCase(t *testing.T, ctr OAuthController, cfg api.RequestConfiguration) {
+	t.Helper()
+
+	// act
+	api.TestAPICall(t, ctr, ctr.start, cfg.WithPathVar("provider", "nowhere")).
+		AddInDocumentation(t, "An unknown provider").
+		ExpectedRequest(t, StartRequest{Provider: "nowhere"}).
+		ExpectedError(t, unknownProvider)
+}
+
+func Test_CallbackRoute(t *testing.T) {
+	t.Parallel()
+
+	api.GroupRouteTests(t, "GET /api/v1/auth/{{"{"}}provider}/callback", NewOAuthController).
+		Documentation(
+			doc.ApiPublicDocumentationV1,
+			openapi.Description("Finishes the login and hands out a session."),
+		).
+		Case("logged in", testCallbackCase).
+		Case("wrong state", testCallbackWrongStateCase)
+}
+
+func testCallbackCase(t *testing.T, ctr OAuthController, cfg api.RequestConfiguration) {
+	t.Helper()
+	// arrange: the caller comes back with the state we sent them away with
+	const state = "the-state-we-sent"
+
+	// act
+	call := api.TestAPICall(t, ctr, ctr.callback, cfg.
+		WithPathVar("provider", testProvider).
+		WithQuery("code=an-authorization-code&state="+state).
+		WithCookie(StateCookieName, state)).
+		ExpectedRequest(t, CallbackRequest{Provider: testProvider, Code: "an-authorization-code", State: state})
+
+	// assert: the caller lands back in the application. How the session itself
+	// travels is the business of the user solution, and is pinned by its tests.
+	answer := call.Answer()
+	must.Eq(t, http.StatusFound, answer.StatusCode)
+	must.StrHasPrefix(t, testAppURL, answer.Header.Get("Location"))
+}
+
+// testCallbackWrongStateCase pins that a callback nobody started is refused: this
+// is what keeps a third party from logging our callers in as somebody else.
+func testCallbackWrongStateCase(t *testing.T, ctr OAuthController, cfg api.RequestConfiguration) {
+	t.Helper()
+
+	// act
+	api.TestAPICall(t, ctr, ctr.callback, cfg.
+		WithPathVar("provider", testProvider).
+		WithQuery("code=an-authorization-code&state=a-forged-state").
+		WithCookie(StateCookieName, "the-state-we-sent")).
+		AddInDocumentation(t, "A callback that no login started").
+		ExpectedError(t, badCallback)
+}

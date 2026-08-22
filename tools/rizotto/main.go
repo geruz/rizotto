@@ -19,6 +19,8 @@ Usage:
 	rizotto make-project [flags]
 	rizotto service add [flags]
 	rizotto controller add [flags]
+	rizotto solution add <name> [flags]
+	rizotto solution list
 	rizotto repository skill
 	rizotto skill
 	rizotto help
@@ -30,10 +32,14 @@ Commands:
 	               works with the database and which CRUD methods it needs
 	controller add scaffold an HTTP controller for one of the services, asking
 	               which routes it serves and whether they need authentication
+	solution       install a whole feature rather than a layer, with the services,
+	               migrations and controllers it is made of; "solution list"
+	               prints what is available
 	repository     "repository skill" prints how the database layer works: the
 	               column conventions, the sqlc queries and the migrations
 	skill          print what a rizotto project is made of; "service skill",
-	               "controller skill" and "repository skill" print one layer
+	               "controller skill", "repository skill" and "solution skill"
+	               print one layer
 
 Every answer can be given upfront with a flag; the remaining ones are asked step
 by step.
@@ -41,6 +47,10 @@ by step.
 
 const (
 	helpCommand = "help"
+	// addCommand is the subcommand scaffolding a layer or installing a solution.
+	addCommand = "add"
+	// listCommand is the subcommand printing what can be installed.
+	listCommand = "list"
 	// helpFlagShort and helpFlagLong ask for the usage of any command.
 	helpFlagShort = "-h"
 	helpFlagLong  = "--help"
@@ -68,6 +78,8 @@ func runCommand(command string, args []string) error {
 		return runService(args, os.Stdin, os.Stdout)
 	case "controller":
 		return runController(args, os.Stdin, os.Stdout)
+	case "solution":
+		return runSolution(args, os.Stdin, os.Stdout)
 	case "repository":
 		return runRepository(args, os.Stdout)
 	case skillCommand:
@@ -251,7 +263,7 @@ func dispatchAdd(args []string, usage string, skill string, out io.Writer, add f
 	}
 
 	switch args[0] {
-	case "add":
+	case addCommand:
 		return add(args[1:])
 	case skillCommand:
 		return printSkill(out, skill)

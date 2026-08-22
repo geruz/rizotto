@@ -1,0 +1,57 @@
+// Package user is the contract of the User service: the users of the project and
+// their sessions.
+package user
+
+import (
+	"context"
+	"time"
+
+	"{{.RizottoModule}}/bb"
+)
+
+type User struct {
+	ID    int    `json:"id"`
+	Email string `json:"email"`
+	Name  string `json:"name"`
+}
+
+// Session is a login that has not expired yet. Token is only filled in by
+// CreateSessionRPC: afterwards only its fingerprint is kept, so it cannot be read
+// back out of the database.
+type Session struct {
+	Token     string
+	ExpiresAt time.Time
+	User      User
+}
+
+type GetUserRequest struct {
+	UserID int
+}
+
+type CreateUserRequest struct {
+	Email string
+	Name  string
+}
+
+type CreateSessionRequest struct {
+	UserID int
+}
+
+type GetSessionRequest struct {
+	Token string
+}
+
+type DeleteSessionRequest struct {
+	Token string
+}
+
+type DeletedSession struct {
+	Deleted bool
+}
+
+//go:generate genbind -client UserClient
+type UserClient interface {
+{{- range .Methods}}
+	// bind-method: {{.Address}}
+	{{.Name}}(ctx context.Context, req {{.Request}}) ({{.Response}}, bb.ServiceError)
+{{end}}}

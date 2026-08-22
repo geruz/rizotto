@@ -1,0 +1,18 @@
+-- The pair of provider and external_id is what identifies a caller: the same
+-- person may log in through several providers, and a provider may hand out an
+-- address another one already used.
+--
+-- user_id has no foreign key on purpose. The users belong to the user service,
+-- which owns its own tables and its own migrations; a constraint across that
+-- boundary would tie the two migration histories together.
+CREATE TABLE public.user_identities (
+    id BIGSERIAL PRIMARY KEY,
+    user_id BIGINT NOT NULL,
+    provider VARCHAR(32) NOT NULL,
+    external_id VARCHAR(255) NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    UNIQUE (provider, external_id)
+);
+
+CREATE INDEX user_identities_user_id_idx ON public.user_identities (user_id);

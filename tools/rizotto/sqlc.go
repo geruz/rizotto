@@ -39,17 +39,20 @@ type sqlcGo struct {
 	EmitEnumValidMethod      bool   `yaml:"emit_enum_valid_method"`
 }
 
-func newSqlcEntry(spec serviceSpec) sqlcEntry {
-	dir := "./" + spec.Dir()
+// newSqlcEntry describes one repository to sqlc. dir is the directory of the
+// service owning it, relative to the project root, and queries the name of its
+// queries file.
+func newSqlcEntry(dir, queries string) sqlcEntry {
+	root := "./" + dir
 
 	return sqlcEntry{
 		Engine:  "postgresql",
-		Queries: dir + "/repository/sql/" + spec.Lower + "-queries.sql",
-		Schema:  []string{dir + "/repository/sql/schema.sql"},
+		Queries: root + "/repository/sql/" + queries,
+		Schema:  []string{root + "/repository/sql/schema.sql"},
 		Gen: sqlcGen{
 			Go: sqlcGo{
 				SQLPackage:               "pgx/v5",
-				Out:                      dir + "/repository/db",
+				Out:                      root + "/repository/db",
 				EmitPointersForNullTypes: true,
 				EmitEnumValidMethod:      true,
 			},
@@ -57,12 +60,16 @@ func newSqlcEntry(spec serviceSpec) sqlcEntry {
 	}
 }
 
-// addSqlcEntry registers the queries of the service in sqlc.yaml, creating the file
-// when it does not exist yet. The rest of the file, comments included, is kept as is.
-// It reports whether the file was written.
-func addSqlcEntry(projectRoot string, spec serviceSpec) (bool, error) {
+// addServiceSqlcEntry registers the queries of a generated service.
+func addServiceSqlcEntry(projectRoot string, spec serviceSpec) (bool, error) {
+	return addSqlcEntry(projectRoot, newSqlcEntry(spec.Dir(), spec.Lower+"-queries.sql"))
+}
+
+// addSqlcEntry registers a repository in sqlc.yaml, creating the file when it does
+// not exist yet. The rest of the file, comments included, is kept as is. It
+// reports whether the file was written.
+func addSqlcEntry(projectRoot string, entry sqlcEntry) (bool, error) {
 	path := filepath.Join(projectRoot, sqlcConfigFile)
-	entry := newSqlcEntry(spec)
 
 	content, err := os.ReadFile(path) //nolint:gosec // the project directory is chosen by the author
 	if errors.Is(err, os.ErrNotExist) {

@@ -15,9 +15,15 @@ OpenAPI documentation) comes from the framework packages.
     rizotto make-project        create a new project (name, directory, git repository, SQL)
     rizotto service add         add a service (database, CRUD methods)
     rizotto controller add      add an HTTP controller for one of the services
+    rizotto solution list       features that can be installed whole: user, oauth
+    rizotto solution add        install one of them, and whatever it is built on
     rizotto skill               this text
     rizotto service skill       how a service works, in detail
     rizotto controller skill    how a controller works, in detail
+    rizotto solution skill      what a solution is and how to write one
+
+Check `solution list` before building a feature by hand: authentication in
+particular is a solution, not something to assemble out of `service add`.
 
 ## Project layout
 

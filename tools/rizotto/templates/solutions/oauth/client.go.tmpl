@@ -1,0 +1,34 @@
+// Package identity is the contract of the Identity service: which external
+// account belongs to which user of the project.
+package identity
+
+import (
+	"context"
+
+	"{{.RizottoModule}}/bb"
+)
+
+// Identity is one external account, and the user it reaches.
+type Identity struct {
+	UserID     int    `json:"userId"`
+	Provider   string `json:"provider"`
+	ExternalID string `json:"externalId"`
+}
+
+type GetIdentityRequest struct {
+	Provider   string
+	ExternalID string
+}
+
+type CreateIdentityRequest struct {
+	UserID     int
+	Provider   string
+	ExternalID string
+}
+
+//go:generate genbind -client IdentityClient
+type IdentityClient interface {
+{{- range .Methods}}
+	// bind-method: {{.Address}}
+	{{.Name}}(ctx context.Context, req {{.Request}}) ({{.Response}}, bb.ServiceError)
+{{end}}}

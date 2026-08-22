@@ -1,0 +1,206 @@
+// Package oauthapi performs the login: it sends the caller to their OAuth
+// provider and turns the answer into a session of this project.
+package oauthapi
+
+import (
+	"context"
+	"errors"
+	"time"
+
+	"{{.RizottoModule}}"
+	"{{.RizottoModule}}/bb"
+	"{{.RizottoModule}}/crypto/token"
+	"{{.RizottoModule}}/gateway"
+
+	"{{.APIImport}}"
+	identity "{{.ClientImport}}"
+	"{{.OAuthImport}}"
+	user "{{.UserClientImport}}"
+)
+
+const (
+	// stateTokenLength is the number of hex characters of the state travelling
+	// with the caller to the provider and back.
+	stateTokenLength = 32
+	// stateTTL is how long a login may take before it has to be started again.
+	stateTTL = 10 * time.Minute
+	// StateCookieName is the cookie the state is remembered in between the legs.
+	StateCookieName = "{{.StateCookieName}}"
+)
+
+type OAuthController struct {
+	gateway.Controller
+
+	providers map[string]oauth.Provider
+
+	getIdentityRPC    identity.GetIdentityRPC
+	createIdentityRPC identity.CreateIdentityRPC
+	createUserRPC     user.CreateUserRPC
+	createSessionRPC  user.CreateSessionRPC
+}
+
+func NewOAuthController() OAuthController {
+	identities := identity.BindClient()
+	users := user.BindClient()
+	ctrl := OAuthController{
+		Controller:        rizotto.Controller{},
+		providers:         oauth.MustLoadProviders(),
+		getIdentityRPC:    identities.GetIdentityRPC,
+		createIdentityRPC: identities.CreateIdentityRPC,
+		createUserRPC:     users.CreateUserRPC,
+		createSessionRPC:  users.CreateSessionRPC,
+	}
+	ctrl.AddRoutes(
+		gateway.Redirect("GET /api/v1/auth/{provider}/start", api.PublicArea, ctrl.start),
+		gateway.Redirect("GET /api/v1/auth/{provider}/callback", api.PublicArea, ctrl.callback),
+	)
+
+	return ctrl
+}
+
+// Errors. The callback answers the same error whatever went wrong with it, so it
+// cannot be used to find out which codes or states exist.
+//
+//nolint:gochecknoglobals // the errors of a controller are declared once
+var (
+	unknownProvider = gateway.NewNotFoundError(
+		gateway.ErrorCode("unknown_provider"), "Unknown provider", "No OAuth provider of that name is configured",
+	)
+	badCallback   = gateway.NewInvalidRequest("The login could not be completed")
+	internalError = gateway.NewInternalError()
+)
+
+//nolint:gochecknoglobals // a zero value with a name
+var noRedirect = gateway.Redirection{Location: "", Status: 0}
+
+var errBadState = errors.New("the state does not match the one of the login")
+
+type StartRequest struct {
+	// json:"-" keeps the json body from overwriting what the path carries.
+	Provider string `in:"path=provider" json:"-"`
+}
+
+type CallbackRequest struct {
+	Provider string `in:"path=provider" json:"-"`
+	Code     string `in:"query=code" json:"-"`
+	State    string `in:"query=state" json:"-"`
+}
+
+// start sends the caller to their provider, remembering the state it generated.
+func (ctrl OAuthController) start(
+	ctx api.PublicHTTPContext, req StartRequest,
+) (gateway.Redirection, gateway.HTTPError) {
+	provider, found := ctrl.providers[req.Provider]
+	if !found {
+		return noRedirect, unknownProvider
+	}
+
+	state, err := token.Secure(stateTokenLength)
+	if err != nil {
+		return noRedirect, internalError
+	}
+
+	gateway.SetCookie(ctx, gateway.NewSessionCookie(StateCookieName, state, stateTTL))
+
+	return gateway.Redirection{Location: provider.AuthorizeURL(state), Status: 0}, nil
+}
+
+// callback finishes the login: it checks the state, asks the provider who the
+// caller is and hands out a session.
+func (ctrl OAuthController) callback(
+	ctx api.PublicHTTPContext, req CallbackRequest,
+) (gateway.Redirection, gateway.HTTPError) {
+	provider, found := ctrl.providers[req.Provider]
+	if !found {
+		return noRedirect, unknownProvider
+	}
+
+	err := checkState(ctx, req.State)
+	if err != nil {
+		return noRedirect, badCallback
+	}
+
+	gateway.SetCookie(ctx, gateway.NewExpiredCookie(StateCookieName))
+
+	if req.Code == "" {
+		return noRedirect, badCallback
+	}
+
+	external, err := identify(ctx, provider, req.Code)
+	if err != nil {
+		return noRedirect, badCallback
+	}
+
+	userID, httpErr := ctrl.userOf(ctx, external)
+	if httpErr != nil {
+		return noRedirect, httpErr
+	}
+
+	session, err := ctrl.createSessionRPC(ctx, user.CreateSessionRequest{UserID: userID})
+	if err != nil {
+		return noRedirect, gateway.MapError(err).Others(internalError)
+	}
+
+	// Where the session travels is the business of the user solution, which owns
+	// the area function reading it back.
+	location := api.HandOverSession(ctx, session.Token, session.ExpiresAt)
+
+	return gateway.Redirection{Location: location, Status: 0}, nil
+}
+
+// checkState makes sure this callback belongs to a login we started.
+func checkState(ctx api.PublicHTTPContext, state string) error {
+	expected, found := gateway.Cookie(ctx, StateCookieName)
+	if !found || state == "" || state != expected {
+		return errBadState
+	}
+
+	return nil
+}
+
+// identify exchanges the authorization code and asks who it belongs to.
+func identify(ctx context.Context, provider oauth.Provider, code string) (oauth.Identity, error) {
+	accessToken, err := provider.Exchange(ctx, code)
+	if err != nil {
+		return oauth.Identity{}, err
+	}
+
+	return provider.UserInfo(ctx, accessToken)
+}
+
+// userOf answers the user behind an external account, creating both the user and
+// the link the first time that account logs in.
+func (ctrl OAuthController) userOf(
+	ctx api.PublicHTTPContext, external oauth.Identity,
+) (int, gateway.HTTPError) {
+	known, err := ctrl.getIdentityRPC(ctx, identity.GetIdentityRequest{
+		Provider:   external.Provider,
+		ExternalID: external.ExternalID,
+	})
+	if err == nil {
+		return known.UserID, nil
+	}
+
+	if !bb.IsNotFoundError(err) {
+		return 0, gateway.MapError(err).Others(internalError)
+	}
+
+	created, err := ctrl.createUserRPC(ctx, user.CreateUserRequest{
+		Email: external.Email,
+		Name:  external.Name,
+	})
+	if err != nil {
+		return 0, gateway.MapError(err).Others(internalError)
+	}
+
+	linked, err := ctrl.createIdentityRPC(ctx, identity.CreateIdentityRequest{
+		UserID:     created.ID,
+		Provider:   external.Provider,
+		ExternalID: external.ExternalID,
+	})
+	if err != nil {
+		return 0, gateway.MapError(err).Others(internalError)
+	}
+
+	return linked.UserID, nil
+}

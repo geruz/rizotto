@@ -1,6 +1,6 @@
 ---
 name: rizotto
-description: Scaffold and extend projects built with the rizotto framework — creating a project, adding services, adding HTTP controllers, and understanding how its layers fit together. Use whenever the user works in a rizotto project, mentions the rizotto CLI, or asks to add a service, controller, or CRUD layer to one.
+description: Scaffold and extend projects built with the rizotto framework — creating a project, adding services, adding HTTP controllers, installing whole features such as authentication, and understanding how its layers fit together. Use whenever the user works in a rizotto project, mentions the rizotto CLI, or asks to add a service, controller, CRUD layer, or login/users/OAuth to one.
 allowed-tools: Bash(rizotto:*)
 ---
 
@@ -31,13 +31,31 @@ Do not run these upfront. Run one when the task actually reaches that layer:
 rizotto service skill      # before adding or changing a service
 rizotto controller skill   # before adding or changing an HTTP controller
 rizotto repository skill   # before writing a query, a migration or a column
+rizotto solution skill     # before building a feature that may already exist
 ```
+
+## Step 3 — check whether the feature already exists
+
+Some features are not worth designing again. Before building one by hand:
+
+```bash
+rizotto solution list            # what can be installed whole
+rizotto solution skill <name>    # what that one does
+```
+
+Authentication is the clearest case: if the user asks for login, users, sessions
+or OAuth, do not assemble it out of `service add` and `controller add` — install
+the solution and report what it printed.
+
+A solution may be built on another one and installs it first. The flags reach only
+the solution you named, so a dependency takes its defaults: when the user cares
+about one of its answers, install it by name first.
 
 ## Scaffolding: never let the CLI go interactive
 
-`make-project`, `service add`, and `controller add` ask for their answers step
-by step when flags are missing. An interactive prompt will hang the session,
-so every answer must be supplied upfront:
+`make-project`, `service add`, `controller add` and `solution add` ask for their
+answers step by step when flags are missing. An interactive prompt will hang the
+session, so every answer must be supplied upfront:
 
 1. Run `rizotto <command> --help` to learn the exact flag names for this
    version.
@@ -55,8 +73,13 @@ Scaffold first, then edit. The generators own the file layout and the wiring
 between layers; hand-written files that skip them tend to be wired up wrong.
 
 - New project → `make-project`
+- A feature `solution list` already covers → `solution add <name>`
 - New domain capability → `service add`, then `controller add` to expose it
 - A controller is scaffolded _for an existing service_, so the service must
   exist first.
 
 After scaffolding, report which files were created before modifying them.
+
+A solution never edits `server.go` or `.env.example`: it prints the few lines to
+add. Those printed steps are part of the task — apply them, do not just relay
+them.

@@ -1,0 +1,119 @@
+package api
+
+import (
+	"sync"
+	"time"
+
+	"{{.RizottoModule}}"
+	"{{.RizottoModule}}/gateway"
+	"{{.RizottoModule}}/settings/env"
+
+	user "{{.ClientImport}}"
+)
+
+// SessionCookieName is the cookie the session token travels in.
+const SessionCookieName = "{{.SessionCookieName}}"
+
+// SessionUser is the caller of an authenticated route. It is a type of its own
+// rather than the CurrentUser placeholder of controller.go, so that installing a
+// solution does not rewrite a file the project may have edited.
+type SessionUser struct {
+	ID    int
+	Email string
+	Name  string
+}
+
+// AuthHTTPContext is the context of the routes AuthArea guards. A handler taking
+// it can rely on User being there: the request never reaches it otherwise.
+type AuthHTTPContext struct {
+	rizotto.HTTPContext
+
+	User SessionUser
+}
+
+//nolint:gochecknoglobals // one value shared by every private route
+var unauthorized = gateway.NewUnauthorizedError("Authentication required")
+
+// The session reader is bound on first use: the area function is referenced while
+// the controllers are built, which happens before the service is registered.
+//
+//nolint:gochecknoglobals // the binding is process wide, like the bb registry
+var (
+	getSession     user.GetSessionRPC
+	getSessionOnce sync.Once
+)
+
+func sessionReader() user.GetSessionRPC {
+	getSessionOnce.Do(func() {
+		getSession = user.BindClient().GetSessionRPC
+	})
+
+	return getSession
+}
+
+// AuthArea builds the context of the routes that require an authenticated user.
+// Answering an error rejects the request before the handler runs.
+func AuthArea(ctx rizotto.HTTPContext) (AuthHTTPContext, rizotto.HTTPError) {
+	empty := AuthHTTPContext{
+		HTTPContext: ctx,
+		User:        SessionUser{ID: 0, Email: "", Name: ""},
+	}
+
+	token, found := SessionToken(ctx)
+	if !found {
+		return empty, unauthorized
+	}
+
+	session, err := sessionReader()(ctx, user.GetSessionRequest{Token: token})
+	if err != nil {
+		return empty, gateway.MapError(err).IfUnauthorized(unauthorized).Others(gateway.NewInternalError())
+	}
+
+	return AuthHTTPContext{
+		HTTPContext: ctx,
+		User: SessionUser{
+			ID:    session.User.ID,
+			Email: session.User.Email,
+			Name:  session.User.Name,
+		},
+	}, nil
+}
+
+// SessionToken reads the session token of the request.
+func SessionToken(ctx rizotto.HTTPContext) (string, bool) {
+{{if .Cookie}}	return gateway.Cookie(ctx, SessionCookieName)
+{{else}}	const prefix = "Bearer "
+
+	header := ctx.Request.Header.Get("Authorization")
+	if len(header) <= len(prefix) || header[:len(prefix)] != prefix {
+		return "", false
+	}
+
+	return header[len(prefix):], true
+{{end}}}
+
+// HandOverSession gives a fresh session to the caller and answers where to send
+// them next. Whoever logged the caller in calls this instead of knowing how the
+// session travels.
+{{if .Cookie}}func HandOverSession(ctx gateway.ExtendedHTTPContext, token string, expiresAt time.Time) string {
+	gateway.SetCookie(ctx, gateway.NewSessionCookie(SessionCookieName, token, time.Until(expiresAt)))
+
+	return AppRedirectURL()
+}
+{{else}}func HandOverSession(_ gateway.ExtendedHTTPContext, token string, _ time.Time) string {
+	// The token rides the fragment, which browsers keep out of both requests and
+	// server logs.
+	return AppRedirectURL() + "#token=" + token
+}
+{{end}}
+// DropSession takes the session away from the caller.
+func DropSession(ctx gateway.ExtendedHTTPContext) {
+{{if .Cookie}}	gateway.SetCookie(ctx, gateway.NewExpiredCookie(SessionCookieName))
+{{else}}	// Nothing to drop: the caller keeps the token itself.
+	_ = ctx
+{{end}}}
+
+// AppRedirectURL is where the caller lands once the login is over.
+func AppRedirectURL() string {
+	return env.MustGetStringValue("APP_LOGIN_REDIRECT_URL")
+}

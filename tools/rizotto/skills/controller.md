@@ -48,14 +48,28 @@ The second argument of a route builds the handler context from the request. Both
 builders live in `api/controller.go`:
 
 ```go
-func PrivateArea(ctx rizotto.HTTPContext) UserHTTPContext // authenticated routes
-func PublicArea(ctx rizotto.HTTPContext) PublicHTTPContext // open routes
+func PrivateArea(ctx rizotto.HTTPContext) (UserHTTPContext, rizotto.HTTPError) // authenticated routes
+func PublicArea(ctx rizotto.HTTPContext) (PublicHTTPContext, rizotto.HTTPError) // open routes
 ```
 
 `UserHTTPContext` carries the current user; the scaffolded version returns a
 placeholder — put the real authentication (token parsing, session lookup) there, and
 every private route gets it. The context is also a `context.Context`, so it is passed
 straight into the RPC call.
+
+An area function answering an error rejects the request **before** the handler runs,
+which is how a route answers 401 to a caller it cannot authenticate:
+
+```go
+func PrivateArea(ctx rizotto.HTTPContext) (UserHTTPContext, rizotto.HTTPError) {
+    session, err := lookUpSession(ctx)
+    if err != nil {
+        return UserHTTPContext{}, gateway.NewUnauthorizedError("no session")
+    }
+
+    return UserHTTPContext{HTTPContext: ctx, User: CurrentUser{Name: session.Name}}, nil
+}
+```
 
 ## 3. The request object
 

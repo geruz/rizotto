@@ -1,0 +1,143 @@
+package userapi
+
+import (
+	"context"
+	"os"
+	"testing"
+	"time"
+
+	"{{.RizottoModule}}/bb"
+	"{{.RizottoModule}}/documentation/openapi"
+	"{{.RizottoModule}}/gateway"
+	"{{.RizottoModule}}/testutils/api"
+
+{{if .Cookie}}	appapi "{{.APIImport}}"
+{{end}}	"{{.Module}}/api/doc"
+	user "{{.ClientImport}}"
+)
+
+const (
+	testEmail   = "person@example.com"
+	testName    = "A Person"
+	testSession = "a-valid-session-token"
+	testUserID  = 1
+)
+
+// TestMain registers a stub user service, so the tests exercise the real routes
+// and the real area function without a database.
+func TestMain(m *testing.M) {
+	if err := os.Setenv("APP_LOGIN_REDIRECT_URL", "http://localhost:3000"); err != nil {
+		panic(err)
+	}
+
+	user.RegisterServer(stubUserService{})
+
+	os.Exit(m.Run())
+}
+
+type stubUserService struct{}
+
+func (stubUserService) GetUserRPC(_ context.Context, req user.GetUserRequest) (user.User, bb.ServiceError) {
+	return user.User{ID: req.UserID, Email: testEmail, Name: testName}, nil
+}
+
+func (stubUserService) CreateUserRPC(_ context.Context, req user.CreateUserRequest) (user.User, bb.ServiceError) {
+	return user.User{ID: testUserID, Email: req.Email, Name: req.Name}, nil
+}
+
+func (stubUserService) CreateSessionRPC(
+	_ context.Context, req user.CreateSessionRequest,
+) (user.Session, bb.ServiceError) {
+	return user.Session{
+		Token:     testSession,
+		ExpiresAt: time.Now().UTC().Add(time.Hour),
+		User:      user.User{ID: req.UserID, Email: testEmail, Name: testName},
+	}, nil
+}
+
+func (stubUserService) GetSessionRPC(
+	_ context.Context, req user.GetSessionRequest,
+) (user.Session, bb.ServiceError) {
+	if req.Token != testSession {
+		return user.Session{}, bb.NewUnauthorizedError("unknown session")
+	}
+
+	return user.Session{
+		Token:     "",
+		ExpiresAt: time.Now().UTC().Add(time.Hour),
+		User:      user.User{ID: testUserID, Email: testEmail, Name: testName},
+	}, nil
+}
+
+func (stubUserService) DeleteSessionRPC(
+	_ context.Context, _ user.DeleteSessionRequest,
+) (user.DeletedSession, bb.ServiceError) {
+	return user.DeletedSession{Deleted: true}, nil
+}
+
+func Test_MeRoute(t *testing.T) {
+	t.Parallel()
+
+	api.GroupRouteTests(t, "GET /api/v1/me", NewUserController).
+		Documentation(
+			doc.ApiPublicDocumentationV1,
+			openapi.Description("Returns the authenticated caller."),
+		).
+		Case("authenticated", testMeCase).
+		Case("without a session", testMeUnauthenticatedCase)
+}
+
+func testMeCase(t *testing.T, ctr UserController, cfg api.RequestConfiguration) {
+	t.Helper()
+
+	// act
+	api.TestAPICall(t, ctr, ctr.me, authenticate(cfg)).
+		AddInDocumentation(t, "OK").
+		ExpectedResponse(t, Me{ID: testUserID, Email: testEmail, Name: testName})
+}
+
+// testMeUnauthenticatedCase pins the point of the area function: the handler is
+// never reached without a session.
+func testMeUnauthenticatedCase(t *testing.T, ctr UserController, cfg api.RequestConfiguration) {
+	t.Helper()
+
+	// act
+	api.TestAPICall(t, ctr, ctr.me, cfg).
+		ExpectedError(t, gateway.NewUnauthorizedError("Authentication required"))
+}
+
+func Test_LogoutRoute(t *testing.T) {
+	t.Parallel()
+
+	api.GroupRouteTests(t, "POST /api/v1/logout", NewUserController).
+		Documentation(
+			doc.ApiPublicDocumentationV1,
+			openapi.Description("Drops the session of the caller."),
+		).
+		Case("logged out", testLogoutCase).
+		Case("without a session", testLogoutWithoutSessionCase)
+}
+
+func testLogoutCase(t *testing.T, ctr UserController, cfg api.RequestConfiguration) {
+	t.Helper()
+
+	// act
+	api.TestAPICall(t, ctr, ctr.logout, authenticate(cfg)).
+		AddInDocumentation(t, "OK").
+		ExpectedResponse(t, LoggedOut{LoggedOut: true})
+}
+
+// testLogoutWithoutSessionCase pins that logging out twice is not an error.
+func testLogoutWithoutSessionCase(t *testing.T, ctr UserController, cfg api.RequestConfiguration) {
+	t.Helper()
+
+	// act
+	api.TestAPICall(t, ctr, ctr.logout, cfg).
+		ExpectedResponse(t, LoggedOut{LoggedOut: true})
+}
+
+// authenticate makes the request carry the session the stub service accepts.
+func authenticate(cfg api.RequestConfiguration) api.RequestConfiguration {
+{{if .Cookie}}	return cfg.WithCookie(appapi.SessionCookieName, testSession)
+{{else}}	return cfg.WithBearer(testSession)
+{{end}}}
