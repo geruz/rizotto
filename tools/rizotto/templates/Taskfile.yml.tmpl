@@ -1,0 +1,68 @@
+version: "3"
+dotenv: [".env"]
+{{- if .SQL}}
+vars:
+    SQLC_VERSION: 1.26.0
+{{- end}}
+tasks:
+    deps:
+        desc: Resolve go dependencies
+        cmds:
+            - go mod tidy
+        silent: true
+
+    start:
+        desc: Run the service
+        cmds:
+            - go run .
+        silent: true
+
+    test:
+        desc: Run the tests with coverage
+        cmds:
+            - mkdir -p out
+            - go test ./... -coverprofile=out/cover.out
+            - go tool cover -func ./out/cover.out
+        silent: true
+
+    lint:
+        desc: Run golangci-lint against the whole module
+        cmds:
+            - golangci-lint run ./...
+        silent: true
+
+    gen:
+        desc: Regenerate the service bindings{{if .SQL}} and the sqlc queries{{end}}
+        cmds:
+            - PATH="$(go env GOPATH)/bin:$PATH" go generate ./...
+{{- if .SQL}}
+            - docker run --rm --user "$(id -u):$(id -g)" -v "$(pwd):/src" -w /src sqlc/sqlc:{{`{{.SQLC_VERSION}}`}} generate
+
+    migrate-up:
+        desc: Apply the migrations of every service
+        cmds:
+            - task: migrate
+              vars: { COMMAND: migrate }
+
+    migrate-down:
+        desc: Roll back the last migration of every service
+        cmds:
+            - task: migrate
+              vars: { COMMAND: rollback }
+
+    migrate:
+        internal: true
+        desc: Run dbmate over the migrations of every service
+        cmds:
+            - |
+                set -e
+                for dir in services/*/repository/migrations; do
+                    [ -d "$dir" ] || continue
+                    service=$(basename "$(dirname "$(dirname "$dir")")")
+                    echo "dbmate {{`{{.COMMAND}}`}} $service"
+                    dbmate -u "${OWNER_DATABASE_URL:-$DATABASE_URL}" \
+                        --migrations-dir "$dir" \
+                        --migrations-table "public.dbmate_migrations_${service}" \
+                        --no-dump-schema --wait {{`{{.COMMAND}}`}}
+                done
+{{- end}}

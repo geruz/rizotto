@@ -1,0 +1,169 @@
+// Package {{.Package}} exposes the {{.Name}} service over HTTP.
+package {{.Package}}
+
+import (
+{{- if .List}}
+	"github.com/samber/lo"
+
+{{end}}
+	"{{.RizottoModule}}"
+	"{{.RizottoModule}}/gateway"
+
+	"{{.Module}}/api"
+	"{{.Service.Import}}"
+)
+
+type {{.Name}}Controller struct {
+	gateway.Controller
+{{range .Routes}}
+	{{.Field}} {{$.Service.Package}}.{{.RPC.Name}}
+{{- end}}
+}
+
+func New{{.Name}}Controller() {{.Name}}Controller {
+	client := {{.Service.Package}}.BindClient()
+	ctrl := {{.Name}}Controller{
+		Controller: rizotto.Controller{},
+{{- range .Routes}}
+		{{.Field}}: client.{{.RPC.Name}},
+{{- end}}
+	}
+	ctrl.AddRoutes(
+{{- range .Routes}}
+		gateway.JSONMethod("{{.Route}}", api.{{$.Area}}, ctrl.{{.Handler}}),
+{{- end}}
+	)
+
+	return ctrl
+}
+
+// Errors.
+var (
+{{- if or .Read (or .Update .Delete)}}
+	{{.Lower}}NotFound = gateway.NewNotFoundError(
+		gateway.ErrorCode("{{.Lower}}_not_found"), "{{.Name}} not found", "{{.Name}} with the given id was not found",
+	)
+{{- end}}
+	internalError = gateway.NewInternalError()
+)
+
+type {{.Name}} struct {
+	ID   int    `json:"id"`
+	Name string `json:"name"`
+}
+{{if .Create}}
+type Create{{.Name}}Request struct {
+	Name string `json:"name" validate:"required"`
+}
+{{end}}{{if or .Read (or .Update .Delete)}}
+type {{.Name}}Request struct {
+	// json:"-" keeps the json body from overwriting what the path carries.
+	{{.Name}}ID int `in:"path={{.Lower}}_id" json:"-"`
+}
+{{end}}{{if .Update}}
+type Update{{.Name}}Request struct {
+	// json:"-" keeps the json body from overwriting what the path carries.
+	{{.Name}}ID int    `in:"path={{.Lower}}_id" json:"-"`
+	Name        string `json:"name"            validate:"required"`
+}
+{{end}}{{if .Delete}}
+type Deleted{{.Name}} struct {
+	ID int `json:"id"`
+}
+{{end}}{{if .List}}
+type {{.Name}}ListRequest struct {
+	Offset int `in:"query=offset;default=0" json:"-"`
+	Limit  int `in:"query=limit;default=10" json:"-"`
+}
+
+type {{.Name}}List struct {
+	Offset int    `json:"offset"`
+	Limit  int    `json:"limit"`
+	{{.NamePlural}} []{{.Name}} `json:"{{.LowerPlural}}"`
+}
+{{end}}{{if .Create}}
+func (ctrl {{.Name}}Controller) create{{.Name}}(
+	ctx api.{{.Context}}, req Create{{.Name}}Request,
+) ({{.Name}}, gateway.HTTPError) {
+	created, err := ctrl.create{{.Name}}RPC(ctx, {{.Service.Package}}.Create{{.Name}}Request{
+		Name: req.Name,
+	})
+	if err != nil {
+		return {{.Name}}{ID: 0, Name: ""}, gateway.MapError(err).
+			Others(internalError)
+	}
+
+	return Service{{.Name}}ToAPI{{.Name}}(created, 0), nil
+}
+{{end}}{{if .Read}}
+func (ctrl {{.Name}}Controller) get{{.Name}}(
+	ctx api.{{.Context}}, req {{.Name}}Request,
+) ({{.Name}}, gateway.HTTPError) {
+	found, err := ctrl.get{{.Name}}RPC(ctx, {{.Service.Package}}.Get{{.Name}}Request{
+		{{.Name}}ID: req.{{.Name}}ID,
+	})
+	if err != nil {
+		return {{.Name}}{ID: 0, Name: ""}, gateway.MapError(err).
+			IfNotFound({{.Lower}}NotFound).
+			Others(internalError)
+	}
+
+	return Service{{.Name}}ToAPI{{.Name}}(found, 0), nil
+}
+{{end}}{{if .List}}
+func (ctrl {{.Name}}Controller) list{{.NamePlural}}(
+	ctx api.{{.Context}}, req {{.Name}}ListRequest,
+) ({{.Name}}List, gateway.HTTPError) {
+	list, err := ctrl.select{{.NamePlural}}RPC(ctx, {{.Service.Package}}.Select{{.NamePlural}}Request{
+		Offset: req.Offset,
+		Limit:  req.Limit,
+	})
+	if err != nil {
+		return {{.Name}}List{Offset: 0, Limit: 0, {{.NamePlural}}: nil}, gateway.MapError(err).
+			Others(internalError)
+	}
+
+	return {{.Name}}List{
+		Offset: list.Offset,
+		Limit:  list.Limit,
+		{{.NamePlural}}: lo.Map(list.{{.NamePlural}}, Service{{.Name}}ToAPI{{.Name}}),
+	}, nil
+}
+{{end}}{{if .Update}}
+func (ctrl {{.Name}}Controller) update{{.Name}}(
+	ctx api.{{.Context}}, req Update{{.Name}}Request,
+) ({{.Name}}, gateway.HTTPError) {
+	updated, err := ctrl.update{{.Name}}RPC(ctx, {{.Service.Package}}.Update{{.Name}}Request{
+		{{.Name}}ID: req.{{.Name}}ID,
+		Name:        req.Name,
+	})
+	if err != nil {
+		return {{.Name}}{ID: 0, Name: ""}, gateway.MapError(err).
+			IfNotFound({{.Lower}}NotFound).
+			Others(internalError)
+	}
+
+	return Service{{.Name}}ToAPI{{.Name}}(updated, 0), nil
+}
+{{end}}{{if .Delete}}
+func (ctrl {{.Name}}Controller) delete{{.Name}}(
+	ctx api.{{.Context}}, req {{.Name}}Request,
+) (Deleted{{.Name}}, gateway.HTTPError) {
+	deleted, err := ctrl.delete{{.Name}}RPC(ctx, {{.Service.Package}}.Delete{{.Name}}Request{
+		{{.Name}}ID: req.{{.Name}}ID,
+	})
+	if err != nil {
+		return Deleted{{.Name}}{ID: 0}, gateway.MapError(err).
+			IfNotFound({{.Lower}}NotFound).
+			Others(internalError)
+	}
+
+	return Deleted{{.Name}}{ID: deleted.{{.Name}}ID}, nil
+}
+{{end}}
+func Service{{.Name}}ToAPI{{.Name}}(src {{.Service.Package}}.{{.Service.Entity}}, _ int) {{.Name}} {
+	return {{.Name}}{
+		ID:   src.ID,
+		Name: src.Name,
+	}
+}

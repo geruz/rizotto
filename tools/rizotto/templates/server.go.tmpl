@@ -1,0 +1,50 @@
+package main
+
+import (
+	"context"
+
+	"{{.RizottoModule}}"
+	"{{.RizottoModule}}/gateway"
+{{- if .SQL}}
+	"{{.RizottoModule}}/pg"
+{{- end}}
+	"{{.RizottoModule}}/settings/env"
+
+	itemsrv "{{.Module}}/services/item"
+	"{{.Module}}/services/item/item-client"
+)
+
+func main() {
+	ctx := context.Background()
+	rizotto.MustInitEnv(ctx)
+	rizotto.MustInitLogger(ctx)
+
+	rizotto.InitMetrics(ctx, ":"+env.GetStringValue("METRICS_PORT", "9091"))
+	rizotto.MustInitTracer(ctx, map[string]string{
+		"service.name":    env.MustGetStringValue("SERVICE_NAME"),
+		"service.version": env.MustGetStringValue("SERVICE_VERSION"),
+		"environment":     env.MustGetStringValue("ENVIRONMENT"),
+	})
+
+	gt := gateway.NewHTTPGateway()
+{{if .SQL}}
+	pgPool := pg.MustOpenConnection(ctx, env.MustGetStringValue("DATABASE_URL"))
+
+	item.RegisterServer(
+		itemsrv.NewItemService(pgPool),
+	)
+{{else}}
+	item.RegisterServer(
+		itemsrv.NewItemService(),
+	)
+{{end}}
+	err := gt.Routing(
+		gateway.JoinRouteTables(
+		// add the route tables of the controllers here:
+		// api.NewSomeController().RouteTable(),
+		),
+	).ListenAndServe(ctx, ":"+env.GetStringValue("PORT", "9090"))
+	if err != nil {
+		panic(err)
+	}
+}

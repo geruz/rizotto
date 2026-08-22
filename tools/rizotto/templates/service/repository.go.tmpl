@@ -1,0 +1,52 @@
+// Package repository is the only place that talks to the database of the {{.Name}} service.
+package repository
+
+import (
+	"context"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"{{.RizottoModule}}/pg"
+
+	"{{.Module}}/services/{{.Lower}}/repository/db"
+)
+
+type {{.Name}}Repository struct {
+	pg.Repository
+
+	queries *db.Queries
+}
+
+func New{{.Name}}Repository(pool *pgxpool.Pool) {{.Name}}Repository {
+	return {{.Name}}Repository{
+		Repository: pg.NewRepository(pool),
+		queries:    db.New(pool),
+	}
+}
+{{if .Create}}
+func (r {{.Name}}Repository) Create{{.Name}}(ctx context.Context, name string) (db.{{.Name}}, error) {
+	return r.queries.Create{{.Name}}(ctx, name)
+}
+{{end}}{{if .Read}}
+func (r {{.Name}}Repository) Get{{.Name}}ByID(ctx context.Context, id int32) (db.{{.Name}}, error) {
+	return r.queries.Get{{.Name}}(ctx, id)
+}
+{{end}}{{if .List}}
+func (r {{.Name}}Repository) Select{{.NamePlural}}(ctx context.Context, limit int32, offset int32) ([]db.{{.Name}}, error) {
+	return r.queries.Select{{.NamePlural}}(ctx, db.Select{{.NamePlural}}Params{
+		Limit:  limit,
+		Offset: offset,
+	})
+}
+{{end}}{{if .Update}}
+func (r {{.Name}}Repository) Update{{.Name}}(ctx context.Context, id int32, name string) (db.{{.Name}}, error) {
+	return r.queries.Update{{.Name}}(ctx, db.Update{{.Name}}Params{
+		ID:   id,
+		Name: name,
+	})
+}
+{{end}}{{if .Delete}}
+func (r {{.Name}}Repository) Delete{{.Name}}(ctx context.Context, id int32) (db.{{.Name}}, error) {
+	return r.queries.Delete{{.Name}}(ctx, id)
+}
+{{end}}

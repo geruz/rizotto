@@ -1,7 +1,10 @@
 package api
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -15,9 +18,14 @@ type (
 		key   string
 		value string
 	}
-	Body        struct{}
+	Body struct {
+		contentType string
+		payload     any
+	}
 	QueryParams string
 )
+
+const jsonContentType = "application/json"
 
 var ErrMissingPathVariable = errors.New("path variable not found in route")
 
@@ -33,6 +41,19 @@ func (p PathParams) apply(req *http.Request) error {
 }
 
 func (b Body) apply(req *http.Request) error {
+	if b.payload == nil {
+		return nil
+	}
+
+	raw, err := json.Marshal(b.payload)
+	if err != nil {
+		return err
+	}
+
+	req.Body = io.NopCloser(bytes.NewReader(raw))
+	req.ContentLength = int64(len(raw))
+	req.Header.Set("Content-Type", b.contentType)
+
 	return nil
 }
 
@@ -71,6 +92,16 @@ func (h RequestConfiguration) WithPathVar(key string, value string) RequestConfi
 	h.configurations = append(h.configurations, PathParams{
 		key:   key,
 		value: value,
+	})
+
+	return h
+}
+
+// WithJSONBody sends the payload as the json body of the request.
+func (h RequestConfiguration) WithJSONBody(payload any) RequestConfiguration {
+	h.configurations = append(h.configurations, Body{
+		contentType: jsonContentType,
+		payload:     payload,
 	})
 
 	return h

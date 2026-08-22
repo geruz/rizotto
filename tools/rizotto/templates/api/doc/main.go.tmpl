@@ -1,0 +1,30 @@
+// Package doc keeps the OpenAPI documents the route tests write to openapi.yml.
+package doc
+
+import (
+	"{{.RizottoModule}}/documentation/openapi"
+)
+
+var ApiPublicDocumentationV1 = &openapi.Documentation{
+	OpenAPI: "3.1.0",
+	Info: openapi.Info{
+		Version:        "1.0.0",
+		Title:          "{{.Name}}",
+		Summary:        "{{.Name}} public API",
+		Description:    "Public HTTP API of the {{.Name}} service.",
+		TermsOfService: "",
+		Contract:       nil,
+		License:        nil,
+	},
+	Servers: []openapi.ServerInfo{
+		{
+			Url:         "http://localhost:9090",
+			Description: "local",
+			Variables:   nil,
+		},
+	},
+	Paths:        nil,
+	Security:     openapi.Security{SecuritySchemes: nil},
+	Tags:         nil,
+	ExternalDocs: nil,
+}

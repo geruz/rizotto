@@ -1,6 +1,27 @@
 version: "3"
 
 tasks:
+    make-project:
+        desc: 'Scaffold a new project: task make-project -- <name> [path] [flags]'
+        cmds:
+            - go run ./tools/rizotto make-project {{.CLI_ARGS}}
+
+    service:add:
+        desc: 'Add a service to a project: task service:add -- -project ../my-app'
+        cmds:
+            - go run ./tools/rizotto service add {{.CLI_ARGS}}
+
+    controller:add:
+        desc: 'Add a controller to a project: task controller:add -- -project ../my-app'
+        cmds:
+            - go run ./tools/rizotto controller add {{.CLI_ARGS}}
+
+    install:tools:
+        desc: Install the rizotto binaries into $(go env GOPATH)/bin
+        cmds:
+            - go install ./tools/rizotto ./tools/genbind
+        silent: true
+
     lint:
         desc: Run golangci-lint against the whole module
         cmds:

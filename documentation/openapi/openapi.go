@@ -6,10 +6,20 @@ import (
 	"os"
 	"reflect"
 	"strings"
+	"sync"
 
 	"github.com/danielgtaylor/huma/schema"
 	"gopkg.in/yaml.v3"
 )
+
+// jsonContentType is the only body media type the documentation deals with.
+const jsonContentType = "application/json"
+
+// docMutex guards the document while it is filled in: the route tests that write
+// it run in parallel.
+//
+//nolint:gochecknoglobals // one lock for the document under construction
+var docMutex sync.Mutex
 
 type Schema struct {
 	Type                 string             `json:"type,omitempty"                 yaml:"type,omitempty"`
@@ -165,12 +175,18 @@ type (
 )
 
 func (d *Documentation) Capture() {
+	docMutex.Lock()
+	defer docMutex.Unlock()
+
 	d.m++
 }
 
 const openAPIFilePerm = 0o600
 
 func (d *Documentation) Release() {
+	docMutex.Lock()
+	defer docMutex.Unlock()
+
 	d.m--
 	if d.m == 0 {
 		data, _ := yaml.Marshal(d)
@@ -183,6 +199,9 @@ func (d *Documentation) Release() {
 }
 
 func (d *Documentation) String() string {
+	docMutex.Lock()
+	defer docMutex.Unlock()
+
 	data, err := json.Marshal(d)
 	if err != nil {
 		return "Marshal error: " + err.Error()
@@ -192,6 +211,9 @@ func (d *Documentation) String() string {
 }
 
 func (d *Documentation) AddRoute(path string) *Path {
+	docMutex.Lock()
+	defer docMutex.Unlock()
+
 	if d.Paths == nil {
 		d.Paths = make(map[string]*Path)
 	}
@@ -206,6 +228,9 @@ func (d *Documentation) AddRoute(path string) *Path {
 var ErrMethodNotSupported = errors.New("method not supported")
 
 func (p *Path) AddOperation(method string) (*Operation, error) {
+	docMutex.Lock()
+	defer docMutex.Unlock()
+
 	o := new(Operation)
 
 	switch strings.ToLower(method) {
@@ -252,11 +277,15 @@ func findParameter(o *Operation, field reflect.StructField) *Parameter {
 	const namePartNumber = 2
 
 	nameParts := strings.SplitN(inParts[0], "=", namePartNumber)
+	if len(nameParts) != namePartNumber {
+		return nil
+	}
+
 	defValue := ""
 
 	for _, part := range inParts[1:] {
 		parts := strings.SplitN(part, "=", namePartNumber)
-		if parts[0] == "default" {
+		if len(parts) == namePartNumber && parts[0] == "default" {
 			defValue = parts[1]
 		}
 	}
@@ -293,6 +322,9 @@ func findParameter(o *Operation, field reflect.StructField) *Parameter {
 }
 
 func (o *Operation) AddRequest(desc string, value any) error {
+	docMutex.Lock()
+	defer docMutex.Unlock()
+
 	if value == nil {
 		return nil
 	}
@@ -301,19 +333,52 @@ func (o *Operation) AddRequest(desc string, value any) error {
 
 	val := reflect.ValueOf(value)
 
+	bodyFields := []reflect.StructField{}
+	bodyExample := map[string]any{}
+
 	for i := range val.NumField() {
 		field := typeOfVal.Field(i)
+
+		// a field without an "in" directive is read from the request body
+		if field.Tag.Get("in") == "" {
+			bodyFields = append(bodyFields, field)
+			bodyExample[bodyFieldName(field)] = val.Field(i).Interface()
+
+			continue
+		}
+
 		p := findParameter(o, field)
+		if p == nil {
+			continue
+		}
+
 		p.Examples[desc] = ExampleObj{
 			Summary: desc,
 			Value:   val.Field(i).Interface(),
 		}
 	}
 
-	return nil
+	if len(bodyFields) == 0 {
+		return nil
+	}
+
+	return o.addRequestBody(desc, bodyFields, bodyExample)
+}
+
+// bodyFieldName is the name the field has in the json body.
+func bodyFieldName(field reflect.StructField) string {
+	name, _, _ := strings.Cut(field.Tag.Get("json"), ",")
+	if name == "" || name == "-" {
+		return field.Name
+	}
+
+	return name
 }
 
 func (o *Operation) AddResponse(desc string, statusCode int, response any) error {
+	docMutex.Lock()
+	defer docMutex.Unlock()
+
 	if o.Responses == nil {
 		o.Responses = make(map[int]ResponseObj)
 	}
@@ -327,12 +392,56 @@ func (o *Operation) AddResponse(desc string, statusCode int, response any) error
 		Description: desc,
 		Headers:     nil,
 		Content: map[string]Content{
-			"application/json": {
+			jsonContentType: {
 				Schema: convertSchema(jsonSchema, response),
 			},
 		},
 		Links: nil,
 	}
+
+	return nil
+}
+
+// addRequestBody documents the fields the handler reads from the json body.
+func (o *Operation) addRequestBody(desc string, fields []reflect.StructField, example map[string]any) error {
+	properties := make(map[string]*Schema, len(fields))
+	required := make([]string, 0, len(fields))
+
+	for _, field := range fields {
+		jsonSchema, err := schema.Generate(field.Type)
+		if err != nil {
+			return err
+		}
+
+		name := bodyFieldName(field)
+		properties[name] = convertSchema(jsonSchema, nil)
+
+		if !strings.Contains(field.Tag.Get("json"), ",omitempty") {
+			required = append(required, name)
+		}
+	}
+
+	if o.RequestBody == nil {
+		o.RequestBody = &RequestBody{
+			Description: desc,
+			Content:     map[string]Content{},
+			RequestBody: true,
+		}
+	}
+
+	content := o.RequestBody.Content[jsonContentType]
+	if content.Schema == nil {
+		//nolint:exhaustruct // an object schema only needs its properties
+		content.Schema = &Schema{
+			Type:                 "object",
+			Properties:           properties,
+			Required:             required,
+			AdditionalProperties: false,
+		}
+	}
+
+	content.Schema.Examples = append(content.Schema.Examples, example)
+	o.RequestBody.Content[jsonContentType] = content
 
 	return nil
 }

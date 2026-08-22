@@ -1,0 +1,36 @@
+// Package api holds the HTTP contexts shared by every controller of {{.Name}}.
+package api
+
+import "{{.RizottoModule}}"
+
+// PrivateArea builds the context of the routes that require an authenticated user.
+// Replace the hardcoded user with the real authentication of the project.
+func PrivateArea(ctx rizotto.HTTPContext) UserHTTPContext {
+	return UserHTTPContext{
+		HTTPContext: ctx,
+		User: CurrentUser{
+			Name: "anonymous",
+		},
+	}
+}
+
+// PublicArea builds the context of the routes open to everybody.
+func PublicArea(ctx rizotto.HTTPContext) PublicHTTPContext {
+	return PublicHTTPContext{
+		HTTPContext: ctx,
+	}
+}
+
+type CurrentUser struct {
+	Name string
+}
+
+type PublicHTTPContext struct {
+	rizotto.HTTPContext
+}
+
+type UserHTTPContext struct {
+	rizotto.HTTPContext
+
+	User CurrentUser
+}

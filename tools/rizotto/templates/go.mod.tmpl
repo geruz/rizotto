@@ -1,0 +1,7 @@
+module {{.Module}}
+
+go {{.GoVersion}}
+{{- if .RizottoPath}}
+
+replace {{.RizottoModule}} => {{.RizottoPath}}
+{{- end}}

@@ -1,0 +1,54 @@
+// Package {{.Lower}} is the contract of the {{.Name}} service: the request and
+// response types plus the RPC interface bind-gen.go is generated from.
+package {{.Lower}}
+
+import (
+	"context"
+
+	"{{.RizottoModule}}/bb"
+)
+
+type {{.Name}} struct {
+	ID   int    `json:"id"`
+	Name string `json:"name"`
+}
+{{if .Create}}
+type Create{{.Name}}Request struct {
+	Name string
+}
+{{end}}{{if .Read}}
+type Get{{.Name}}Request struct {
+	{{.Name}}ID int
+}
+{{end}}{{if .Update}}
+type Update{{.Name}}Request struct {
+	{{.Name}}ID int
+	Name        string
+}
+{{end}}{{if .Delete}}
+type Delete{{.Name}}Request struct {
+	{{.Name}}ID int
+}
+
+type Deleted{{.Name}} struct {
+	{{.Name}}ID int
+}
+{{end}}{{if .List}}
+type Select{{.NamePlural}}Request struct {
+	Offset int
+	Limit  int
+}
+
+type {{.Name}}List struct {
+	Offset int
+	Limit  int
+
+	{{.NamePlural}} []{{.Name}}
+}
+{{end}}
+//go:generate genbind -client {{.Name}}Client
+type {{.Name}}Client interface {
+{{- range .Methods}}
+	// bind-method: {{.Address}}
+	{{.Name}}(ctx context.Context, req {{.Request}}) ({{.Response}}, bb.ServiceError)
+{{end}}}

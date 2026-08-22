@@ -38,6 +38,7 @@
         "Taskfile",
         "testutils",
         "tmpl",
+        "tspan",
         "unparam",
         "usersrv"
     ],

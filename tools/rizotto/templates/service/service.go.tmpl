@@ -1,0 +1,297 @@
+{{if .DB -}}
+// Package {{.Package}} implements the {{.Name}} RPCs on top of the {{.LowerPlural}} table.
+package {{.Package}}
+
+import (
+	"context"
+{{- if or .NeedsID .List}}
+	"math"
+{{- end}}
+
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"{{.RizottoModule}}/bb"
+{{- if .NeedsID}}
+	"{{.RizottoModule}}/pg"
+{{- end}}
+
+	"{{.Module}}/services/{{.Lower}}/{{.Lower}}-client"
+{{- if .NeedsModel}}
+	"{{.Module}}/services/{{.Lower}}/repository"
+	"{{.Module}}/services/{{.Lower}}/repository/db"
+{{- else}}
+	"{{.Module}}/services/{{.Lower}}/repository"
+{{- end}}
+)
+{{if .List}}
+const defaultLimit = 10
+{{end}}
+type {{.Name}}Service struct {
+	repo repository.{{.Name}}Repository
+}
+
+func New{{.Name}}Service(pool *pgxpool.Pool) {{.Name}}Service {
+	return {{.Name}}Service{repo: repository.New{{.Name}}Repository(pool)}
+}
+{{if .Create}}
+func (srv {{.Name}}Service) Create{{.Name}}RPC(
+	ctx context.Context,
+	req {{.Lower}}.Create{{.Name}}Request,
+) ({{.Lower}}.{{.Name}}, bb.ServiceError) {
+	if req.Name == "" {
+		return {{.Lower}}.{{.Name}}{}, bb.NewInvalidRequestError("name is required")
+	}
+
+	created, err := srv.repo.Create{{.Name}}(ctx, req.Name)
+	if err != nil {
+		return {{.Lower}}.{{.Name}}{}, bb.NewInternalError("failed to create {{.Lower}}", err)
+	}
+
+	return to{{.Name}}(created), nil
+}
+{{end}}{{if .Read}}
+func (srv {{.Name}}Service) Get{{.Name}}RPC(
+	ctx context.Context,
+	req {{.Lower}}.Get{{.Name}}Request,
+) ({{.Lower}}.{{.Name}}, bb.ServiceError) {
+	id, svcErr := to{{.Name}}ID(req.{{.Name}}ID)
+	if svcErr != nil {
+		return {{.Lower}}.{{.Name}}{}, svcErr
+	}
+
+	found, err := srv.repo.Get{{.Name}}ByID(ctx, id)
+	if err != nil {
+		if pg.IsNotFoundError(err) {
+			return {{.Lower}}.{{.Name}}{}, bb.NewNotFoundError("{{.Lower}} not found")
+		}
+
+		return {{.Lower}}.{{.Name}}{}, bb.NewInternalError("failed to get {{.Lower}}", err)
+	}
+
+	return to{{.Name}}(found), nil
+}
+{{end}}{{if .List}}
+func (srv {{.Name}}Service) Select{{.NamePlural}}RPC(
+	ctx context.Context,
+	req {{.Lower}}.Select{{.NamePlural}}Request,
+) ({{.Lower}}.{{.Name}}List, bb.ServiceError) {
+	limit, offset := req.Limit, req.Offset
+	if limit <= 0 || limit > math.MaxInt32 {
+		limit = defaultLimit
+	}
+
+	if offset < 0 || offset > math.MaxInt32 {
+		offset = 0
+	}
+
+	rows, err := srv.repo.Select{{.NamePlural}}(ctx, int32(limit), int32(offset))
+	if err != nil {
+		return {{.Lower}}.{{.Name}}List{}, bb.NewInternalError("failed to select {{.LowerPlural}}", err)
+	}
+
+	{{.LowerPlural}} := make([]{{.Lower}}.{{.Name}}, len(rows))
+	for i, row := range rows {
+		{{.LowerPlural}}[i] = to{{.Name}}(row)
+	}
+
+	return {{.Lower}}.{{.Name}}List{
+		Offset:      offset,
+		Limit:       limit,
+		{{.NamePlural}}: {{.LowerPlural}},
+	}, nil
+}
+{{end}}{{if .Update}}
+func (srv {{.Name}}Service) Update{{.Name}}RPC(
+	ctx context.Context,
+	req {{.Lower}}.Update{{.Name}}Request,
+) ({{.Lower}}.{{.Name}}, bb.ServiceError) {
+	id, svcErr := to{{.Name}}ID(req.{{.Name}}ID)
+	if svcErr != nil {
+		return {{.Lower}}.{{.Name}}{}, svcErr
+	}
+
+	if req.Name == "" {
+		return {{.Lower}}.{{.Name}}{}, bb.NewInvalidRequestError("name is required")
+	}
+
+	updated, err := srv.repo.Update{{.Name}}(ctx, id, req.Name)
+	if err != nil {
+		if pg.IsNotFoundError(err) {
+			return {{.Lower}}.{{.Name}}{}, bb.NewNotFoundError("{{.Lower}} not found")
+		}
+
+		return {{.Lower}}.{{.Name}}{}, bb.NewInternalError("failed to update {{.Lower}}", err)
+	}
+
+	return to{{.Name}}(updated), nil
+}
+{{end}}{{if .Delete}}
+func (srv {{.Name}}Service) Delete{{.Name}}RPC(
+	ctx context.Context,
+	req {{.Lower}}.Delete{{.Name}}Request,
+) ({{.Lower}}.Deleted{{.Name}}, bb.ServiceError) {
+	id, svcErr := to{{.Name}}ID(req.{{.Name}}ID)
+	if svcErr != nil {
+		return {{.Lower}}.Deleted{{.Name}}{}, svcErr
+	}
+
+	deleted, err := srv.repo.Delete{{.Name}}(ctx, id)
+	if err != nil {
+		if pg.IsNotFoundError(err) {
+			return {{.Lower}}.Deleted{{.Name}}{}, bb.NewNotFoundError("{{.Lower}} not found")
+		}
+
+		return {{.Lower}}.Deleted{{.Name}}{}, bb.NewInternalError("failed to delete {{.Lower}}", err)
+	}
+
+	return {{.Lower}}.Deleted{{.Name}}{ {{.Name}}ID: int(deleted.ID)}, nil
+}
+{{end}}{{if .NeedsID}}
+func to{{.Name}}ID(id int) (int32, bb.ServiceError) {
+	if id <= 0 || id > math.MaxInt32 {
+		return 0, bb.NewInvalidRequestError("invalid {{.Lower}} id")
+	}
+
+	return int32(id), nil
+}
+{{end}}{{if .NeedsModel}}
+func to{{.Name}}(row db.{{.Name}}) {{.Lower}}.{{.Name}} {
+	return {{.Lower}}.{{.Name}}{
+		ID:   int(row.ID),
+		Name: row.Name,
+	}
+}
+{{end}}
+{{- else -}}
+// Package {{.Package}} implements the {{.Name}} RPCs. The {{.LowerPlural}} are kept in
+// memory: replace the store with a repository once the service gets a database.
+package {{.Package}}
+
+import (
+	"context"
+	"sync"
+
+	"{{.RizottoModule}}/bb"
+
+	"{{.Module}}/services/{{.Lower}}/{{.Lower}}-client"
+)
+{{if .List}}
+const defaultLimit = 10
+{{end}}
+type {{.Name}}Service struct {
+	mu     sync.RWMutex
+	{{.LowerPlural}} []{{.Lower}}.{{.Name}}
+	lastID int
+}
+
+func New{{.Name}}Service() *{{.Name}}Service {
+	return &{{.Name}}Service{
+		mu:     sync.RWMutex{},
+		{{.LowerPlural}}: []{{.Lower}}.{{.Name}}{},
+		lastID: 0,
+	}
+}
+{{if .Create}}
+func (srv *{{.Name}}Service) Create{{.Name}}RPC(
+	_ context.Context,
+	req {{.Lower}}.Create{{.Name}}Request,
+) ({{.Lower}}.{{.Name}}, bb.ServiceError) {
+	if req.Name == "" {
+		return {{.Lower}}.{{.Name}}{}, bb.NewInvalidRequestError("name is required")
+	}
+
+	srv.mu.Lock()
+	defer srv.mu.Unlock()
+
+	srv.lastID++
+	created := {{.Lower}}.{{.Name}}{ID: srv.lastID, Name: req.Name}
+	srv.{{.LowerPlural}} = append(srv.{{.LowerPlural}}, created)
+
+	return created, nil
+}
+{{end}}{{if .Read}}
+func (srv *{{.Name}}Service) Get{{.Name}}RPC(
+	_ context.Context,
+	req {{.Lower}}.Get{{.Name}}Request,
+) ({{.Lower}}.{{.Name}}, bb.ServiceError) {
+	srv.mu.RLock()
+	defer srv.mu.RUnlock()
+
+	for _, existing := range srv.{{.LowerPlural}} {
+		if existing.ID == req.{{.Name}}ID {
+			return existing, nil
+		}
+	}
+
+	return {{.Lower}}.{{.Name}}{}, bb.NewNotFoundError("{{.Lower}} not found")
+}
+{{end}}{{if .List}}
+func (srv *{{.Name}}Service) Select{{.NamePlural}}RPC(
+	_ context.Context,
+	req {{.Lower}}.Select{{.NamePlural}}Request,
+) ({{.Lower}}.{{.Name}}List, bb.ServiceError) {
+	limit, offset := req.Limit, req.Offset
+	if limit <= 0 {
+		limit = defaultLimit
+	}
+
+	if offset < 0 {
+		offset = 0
+	}
+
+	srv.mu.RLock()
+	defer srv.mu.RUnlock()
+
+	page := []{{.Lower}}.{{.Name}}{}
+	if offset < len(srv.{{.LowerPlural}}) {
+		page = srv.{{.LowerPlural}}[offset:min(offset+limit, len(srv.{{.LowerPlural}}))]
+	}
+
+	return {{.Lower}}.{{.Name}}List{
+		Offset:      offset,
+		Limit:       limit,
+		{{.NamePlural}}: page,
+	}, nil
+}
+{{end}}{{if .Update}}
+func (srv *{{.Name}}Service) Update{{.Name}}RPC(
+	_ context.Context,
+	req {{.Lower}}.Update{{.Name}}Request,
+) ({{.Lower}}.{{.Name}}, bb.ServiceError) {
+	if req.Name == "" {
+		return {{.Lower}}.{{.Name}}{}, bb.NewInvalidRequestError("name is required")
+	}
+
+	srv.mu.Lock()
+	defer srv.mu.Unlock()
+
+	for i, existing := range srv.{{.LowerPlural}} {
+		if existing.ID == req.{{.Name}}ID {
+			srv.{{.LowerPlural}}[i].Name = req.Name
+
+			return srv.{{.LowerPlural}}[i], nil
+		}
+	}
+
+	return {{.Lower}}.{{.Name}}{}, bb.NewNotFoundError("{{.Lower}} not found")
+}
+{{end}}{{if .Delete}}
+func (srv *{{.Name}}Service) Delete{{.Name}}RPC(
+	_ context.Context,
+	req {{.Lower}}.Delete{{.Name}}Request,
+) ({{.Lower}}.Deleted{{.Name}}, bb.ServiceError) {
+	srv.mu.Lock()
+	defer srv.mu.Unlock()
+
+	for i, existing := range srv.{{.LowerPlural}} {
+		if existing.ID == req.{{.Name}}ID {
+			srv.{{.LowerPlural}} = append(srv.{{.LowerPlural}}[:i], srv.{{.LowerPlural}}[i+1:]...)
+
+			return {{.Lower}}.Deleted{{.Name}}{ {{.Name}}ID: req.{{.Name}}ID}, nil
+		}
+	}
+
+	return {{.Lower}}.Deleted{{.Name}}{}, bb.NewNotFoundError("{{.Lower}} not found")
+}
+{{end}}
+{{- end}}

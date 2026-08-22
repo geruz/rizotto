@@ -1,0 +1,199 @@
+package {{.Package}}
+
+import (
+	"errors"
+	"testing"
+
+	"{{.RizottoModule}}/bb"
+	"{{.RizottoModule}}/documentation/openapi"
+	"{{.RizottoModule}}/testutils/api"
+	"{{.RizottoModule}}/testutils/mock"
+
+	"{{.Module}}/api/doc"
+	"{{.Service.Import}}"
+)
+
+const test{{.Name}}Name = "first {{.Lower}}"
+
+var errInternalExample = errors.New("test error")
+{{if .Create}}
+func Test_Create{{.Name}}Route(t *testing.T) {
+	t.Parallel()
+
+	api.GroupRouteTests(t, "POST {{.Prefix}}", New{{.Name}}Controller).
+		Documentation(
+			doc.ApiPublicDocumentationV1,
+			openapi.Description("Creates a `{{.Name}}`."),
+		).
+		Case("created", testCreate{{.Name}}Case)
+}
+
+func testCreate{{.Name}}Case(t *testing.T, ctr {{.Name}}Controller, cfg api.RequestConfiguration) {
+	t.Helper()
+	// arrange
+	mock.RPC(&ctr.create{{.Name}}RPC).Success({{.Service.Package}}.{{.Service.Entity}}{ID: 1, Name: test{{.Name}}Name})
+
+	// act
+	api.TestAPICall(t, ctr, ctr.create{{.Name}}, cfg.WithJSONBody(Create{{.Name}}Request{Name: test{{.Name}}Name})).
+		AddInDocumentation(t, "OK").
+		ExpectedRequest(t, Create{{.Name}}Request{Name: test{{.Name}}Name}).
+		ExpectedResponse(t, {{.Name}}{ID: 1, Name: test{{.Name}}Name})
+}
+{{end}}{{if .Read}}
+func Test_Get{{.Name}}Route(t *testing.T) {
+	t.Parallel()
+
+	api.GroupRouteTests(t, "GET {{.Prefix}}/{{"{"}}{{.Lower}}_id}", New{{.Name}}Controller).
+		Documentation(
+			doc.ApiPublicDocumentationV1,
+			openapi.Description("Returns the `{{.Name}}` with the given `id`."),
+		).
+		Case("existing {{.Lower}}", testGet{{.Name}}Case).
+		Case("{{.Lower}} not found", testGet{{.Name}}NotFoundCase).
+		Case("internal error", testGet{{.Name}}InternalErrorCase)
+}
+
+func testGet{{.Name}}Case(t *testing.T, ctr {{.Name}}Controller, cfg api.RequestConfiguration) {
+	t.Helper()
+	// arrange
+	mock.RPC(&ctr.get{{.Name}}RPC).Success({{.Service.Package}}.{{.Service.Entity}}{ID: 1, Name: test{{.Name}}Name})
+
+	// act
+	api.TestAPICall(t, ctr, ctr.get{{.Name}}, cfg.WithPathVar("{{.Lower}}_id", "1")).
+		AddInDocumentation(t, "OK").
+		ExpectedRequest(t, {{.Name}}Request{{"{"}}{{.Name}}ID: 1}).
+		ExpectedResponse(t, {{.Name}}{ID: 1, Name: test{{.Name}}Name})
+}
+
+func testGet{{.Name}}NotFoundCase(t *testing.T, ctr {{.Name}}Controller, cfg api.RequestConfiguration) {
+	t.Helper()
+	// arrange
+	mock.RPC(&ctr.get{{.Name}}RPC).Error(bb.NewNotFoundError("{{.Lower}} not found"))
+
+	// act
+	api.TestAPICall(t, ctr, ctr.get{{.Name}}, cfg.WithPathVar("{{.Lower}}_id", "2")).
+		AddInDocumentation(t, "A {{.Lower}} not found").
+		ExpectedRequest(t, {{.Name}}Request{{"{"}}{{.Name}}ID: 2}).
+		ExpectedError(t, {{.Lower}}NotFound)
+}
+
+func testGet{{.Name}}InternalErrorCase(t *testing.T, ctr {{.Name}}Controller, cfg api.RequestConfiguration) {
+	t.Helper()
+	// arrange
+	mock.RPC(&ctr.get{{.Name}}RPC).Error(bb.NewInternalError("internal error", errInternalExample))
+
+	// act
+	api.TestAPICall(t, ctr, ctr.get{{.Name}}, cfg.WithPathVar("{{.Lower}}_id", "3")).
+		AddInDocumentation(t, "An internal error").
+		ExpectedRequest(t, {{.Name}}Request{{"{"}}{{.Name}}ID: 3}).
+		ExpectedError(t, internalError)
+}
+{{end}}{{if .List}}
+func Test_List{{.NamePlural}}Route(t *testing.T) {
+	t.Parallel()
+
+	api.GroupRouteTests(t, "GET {{.Prefix}}", New{{.Name}}Controller).
+		Documentation(
+			doc.ApiPublicDocumentationV1,
+			openapi.Description("Returns a page of `{{.Name}}` objects."),
+		).
+		Case("{{.Lower}} list", testList{{.NamePlural}}Case).
+		Case("{{.Lower}} list with default paging", testList{{.NamePlural}}DefaultsCase)
+}
+
+func testList{{.NamePlural}}Case(t *testing.T, ctr {{.Name}}Controller, cfg api.RequestConfiguration) {
+	t.Helper()
+	// arrange
+	mock.RPC(&ctr.select{{.NamePlural}}RPC).Success({{.Service.Package}}.{{.Service.Entity}}List{
+		Offset: 2,
+		Limit:  10,
+		{{.NamePlural}}: []{{.Service.Package}}.{{.Service.Entity}}{
+			{ID: 1, Name: test{{.Name}}Name},
+		},
+	})
+
+	// act
+	api.TestAPICall(t, ctr, ctr.list{{.NamePlural}}, cfg.WithQuery("limit=10&offset=2")).
+		AddInDocumentation(t, "OK").
+		ExpectedRequest(t, {{.Name}}ListRequest{Offset: 2, Limit: 10}).
+		ExpectedResponse(t, {{.Name}}List{
+			Offset: 2,
+			Limit:  10,
+			{{.NamePlural}}: []{{.Name}}{
+				{ID: 1, Name: test{{.Name}}Name},
+			},
+		})
+}
+
+func testList{{.NamePlural}}DefaultsCase(t *testing.T, ctr {{.Name}}Controller, cfg api.RequestConfiguration) {
+	t.Helper()
+	// arrange
+	mock.RPC(&ctr.select{{.NamePlural}}RPC).Success({{.Service.Package}}.{{.Service.Entity}}List{
+		Offset: 0,
+		Limit:  10,
+		{{.NamePlural}}: []{{.Service.Package}}.{{.Service.Entity}}{
+			{ID: 1, Name: test{{.Name}}Name},
+		},
+	})
+
+	// act
+	api.TestAPICall(t, ctr, ctr.list{{.NamePlural}}, cfg.WithQuery("")).
+		AddInDocumentation(t, "DefaultValues").
+		ExpectedRequest(t, {{.Name}}ListRequest{Offset: 0, Limit: 10}).
+		ExpectedResponse(t, {{.Name}}List{
+			Offset: 0,
+			Limit:  10,
+			{{.NamePlural}}: []{{.Name}}{
+				{ID: 1, Name: test{{.Name}}Name},
+			},
+		})
+}
+{{end}}{{if .Update}}
+func Test_Update{{.Name}}Route(t *testing.T) {
+	t.Parallel()
+
+	api.GroupRouteTests(t, "PUT {{.Prefix}}/{{"{"}}{{.Lower}}_id}", New{{.Name}}Controller).
+		Documentation(
+			doc.ApiPublicDocumentationV1,
+			openapi.Description("Updates the `{{.Name}}` with the given `id`."),
+		).
+		Case("updated", testUpdate{{.Name}}Case)
+}
+
+func testUpdate{{.Name}}Case(t *testing.T, ctr {{.Name}}Controller, cfg api.RequestConfiguration) {
+	t.Helper()
+	// arrange
+	mock.RPC(&ctr.update{{.Name}}RPC).Success({{.Service.Package}}.{{.Service.Entity}}{ID: 1, Name: test{{.Name}}Name})
+
+	// act
+	api.TestAPICall(t, ctr, ctr.update{{.Name}},
+		cfg.WithPathVar("{{.Lower}}_id", "1").WithJSONBody(Update{{.Name}}Request{Name: test{{.Name}}Name}),
+	).
+		AddInDocumentation(t, "OK").
+		ExpectedRequest(t, Update{{.Name}}Request{{"{"}}{{.Name}}ID: 1, Name: test{{.Name}}Name}).
+		ExpectedResponse(t, {{.Name}}{ID: 1, Name: test{{.Name}}Name})
+}
+{{end}}{{if .Delete}}
+func Test_Delete{{.Name}}Route(t *testing.T) {
+	t.Parallel()
+
+	api.GroupRouteTests(t, "DELETE {{.Prefix}}/{{"{"}}{{.Lower}}_id}", New{{.Name}}Controller).
+		Documentation(
+			doc.ApiPublicDocumentationV1,
+			openapi.Description("Deletes the `{{.Name}}` with the given `id`."),
+		).
+		Case("deleted", testDelete{{.Name}}Case)
+}
+
+func testDelete{{.Name}}Case(t *testing.T, ctr {{.Name}}Controller, cfg api.RequestConfiguration) {
+	t.Helper()
+	// arrange
+	mock.RPC(&ctr.delete{{.Name}}RPC).Success({{.Service.Package}}.Deleted{{.Service.Entity}}{{"{"}}{{.Service.Entity}}ID: 1})
+
+	// act
+	api.TestAPICall(t, ctr, ctr.delete{{.Name}}, cfg.WithPathVar("{{.Lower}}_id", "1")).
+		AddInDocumentation(t, "OK").
+		ExpectedRequest(t, {{.Name}}Request{{"{"}}{{.Name}}ID: 1}).
+		ExpectedResponse(t, Deleted{{.Name}}{ID: 1})
+}
+{{end}}
