@@ -156,7 +156,7 @@ docker, driven by `sqlc.yaml`, which has one entry per service):
 SELECT * FROM public.orders WHERE id = $1;
 
 -- name: SelectOrders :many
-SELECT * FROM public.orders ORDER BY created_at DESC LIMIT $1 OFFSET $2;
+SELECT * FROM public.orders ORDER BY created_at DESC, id DESC LIMIT $1 OFFSET $2;
 ```
 
 Every schema change needs both a migration (`repository/migrations/`, applied by

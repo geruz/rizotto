@@ -5,6 +5,8 @@ CREATE TABLE public.{{.LowerPlural}} (
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
-
+{{if .List}}
+CREATE INDEX {{.LowerPlural}}_created_at_id_idx ON public.{{.LowerPlural}} (created_at DESC, id DESC);
+{{end}}
 -- migrate:down
 DROP TABLE public.{{.LowerPlural}};
