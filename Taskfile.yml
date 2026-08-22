@@ -16,6 +16,11 @@ tasks:
         cmds:
             - go run ./tools/rizotto controller add {{.CLI_ARGS}}
 
+    solution:add:
+        desc: 'Install a solution into a project: task solution:add -- auth -project ../my-app'
+        cmds:
+            - go run ./tools/rizotto solution add {{.CLI_ARGS}}
+
     install:tools:
         desc: Install the rizotto binaries into $(go env GOPATH)/bin
         cmds:

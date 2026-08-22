@@ -16,6 +16,10 @@ var MustInitTracer = trace.MustInit
 type HTTPContext = gateway.HTTPContext
 type Controller = gateway.Controller
 
+// HTTPError is what an area function answers to reject a request, so that the
+// contexts of a project can be declared without importing the gateway.
+type HTTPError = gateway.HTTPError
+
 func MustInitEnv(ctx context.Context) {
 	env.MustLoadEnvFile(".env")
 }

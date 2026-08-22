@@ -3,7 +3,10 @@ package token
 import (
 	"context"
 	crypto "crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
+	"errors"
+	"fmt"
 	math "math/rand"
 	"time"
 
@@ -11,8 +14,9 @@ import (
 )
 
 const charset = "0123456789abcdef"
-
 const hexBytesPerChar = 2
+
+var ErrOddLength = errors.New("token length must be positive and even")
 
 var seededRand *math.Rand = math.New(math.NewSource(time.Now().UnixNano())) //nolint:gosec
 
@@ -43,4 +47,23 @@ func Generate(ctx context.Context, length int) string {
 	logger.Warn(ctx, "Failed to crypto token, go to fallback "+err.Error())
 
 	return fallback(length)
+}
+
+func Hash(value string) string {
+	digest := sha256.Sum256([]byte(value))
+
+	return hex.EncodeToString(digest[:])
+}
+
+func Secure(length int) (string, error) {
+	if length <= 0 || length%hexBytesPerChar != 0 {
+		return "", fmt.Errorf("%w, got %d", ErrOddLength, length)
+	}
+
+	token, err := cryptoGen(length)
+	if err != nil {
+		return "", fmt.Errorf("generate secure token: %w", err)
+	}
+
+	return token, nil
 }

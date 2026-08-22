@@ -83,6 +83,32 @@ func (c CallInfo[TRequest, TResponse]) ExpectedRequest(t *testing.T, data TReque
 	return c
 }
 
+func (c CallInfo[TRequest, TResponse]) Answer() *http.Response {
+	return c.response
+}
+
+func (c CallInfo[TRequest, TResponse]) AnswerCookie(name string) (*http.Cookie, bool) {
+	for _, cookie := range c.response.Cookies() {
+		if cookie.Name == name {
+			return cookie, true
+		}
+	}
+
+	return nil, false
+}
+
+func (c CallInfo[TRequest, TResponse]) ExpectedRedirect(
+	t *testing.T,
+	code int,
+	location string,
+) CallInfo[TRequest, TResponse] {
+	t.Helper()
+	must.Eq(t, code, c.response.StatusCode)
+	must.Eq(t, location, c.response.Header.Get("Location"))
+
+	return c
+}
+
 func (c CallInfo[TRequest, TResponse]) ExpectedResponse(t *testing.T, data TResponse) CallInfo[TRequest, TResponse] {
 	t.Helper()
 	c.ExpectedSuccess(t, http.StatusOK, data)

@@ -5,6 +5,11 @@ import (
 	"net/http"
 )
 
+const (
+	notFoundCode     = "not_found"
+	unauthorizedCode = "unauthorized"
+)
+
 type baseError struct {
 	StatusCode int    `json:"statusCode"`
 	ErrorCode  string `json:"errorCode"`
@@ -22,7 +27,11 @@ func (e *baseError) Code() string {
 }
 
 func (e *baseError) IsNotFound() bool {
-	return e.ErrorCode == "not_found"
+	return e.ErrorCode == notFoundCode
+}
+
+func (e *baseError) IsUnauthorized() bool {
+	return e.ErrorCode == unauthorizedCode
 }
 
 type NotImplementedError struct {
@@ -81,7 +90,7 @@ func NewNotFoundError(message string) *NotFoundError {
 	return &NotFoundError{
 		baseError: baseError{
 			StatusCode: http.StatusNotFound,
-			ErrorCode:  "not_found",
+			ErrorCode:  notFoundCode,
 		},
 		PrivateDetails: message,
 	}
@@ -107,7 +116,7 @@ func NewUnauthorizedError(message string) *UnauthorizedError {
 	return &UnauthorizedError{
 		baseError: baseError{
 			StatusCode: http.StatusUnauthorized,
-			ErrorCode:  "unauthorized",
+			ErrorCode:  unauthorizedCode,
 		},
 		PrivateDetails: message,
 	}

@@ -13,7 +13,7 @@ type route[TContext ExtendedHTTPContext, TRequest any, TResponse any] struct {
 	method string
 	path   string
 
-	createContext    func(HTTPContext) TContext
+	createContext    func(HTTPContext) (TContext, HTTPError)
 	controllerMethod func(TContext, TRequest) (TResponse, HTTPError)
 	renderer         Renderer[TContext, TResponse]
 }
@@ -33,7 +33,17 @@ func (route route[TContext, TRequest, TResult]) Handler() http.HandlerFunc {
 			Writer:  w,
 			Request: r,
 		}
-		tCtx := route.createContext(httpCtx)
+		tCtx, guardErr := route.createContext(httpCtx)
+		if guardErr != nil {
+			// The typed context does not exist yet, so the renderer cannot be
+			// used and the error goes straight to the writer.
+			err := RenderHTTPError(w, guardErr)
+			if err != nil {
+				logger.Error(ctx, "failed to render error response", err)
+			}
+
+			return
+		}
 
 		reqObj, err := requestBuilder(w, r)
 
@@ -91,9 +101,12 @@ type Route interface {
 	String() string
 }
 
+// MustMakeRouteMethod builds one route. The area function may reject the request:
+// when it answers an error the handler is never called and the error is rendered
+// as is, which is how an authenticated area answers 401 or 403.
 func MustMakeRouteMethod[TRequest any, TContext ExtendedHTTPContext, TResponse any](
 	routeStr string,
-	context func(ctx HTTPContext) TContext,
+	context func(ctx HTTPContext) (TContext, HTTPError),
 	handler func(ctx TContext, req TRequest) (TResponse, HTTPError),
 	renderer Renderer[TContext, TResponse],
 ) Route {
@@ -110,7 +123,6 @@ func MustMakeRouteMethod[TRequest any, TContext ExtendedHTTPContext, TResponse a
 		createContext:    context,
 		controllerMethod: handler,
 		renderer:         renderer,
-		//		pipe:   []interface{}{context, handler, renderer},
 	}
 }
 

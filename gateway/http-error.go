@@ -10,11 +10,6 @@ type HTTPApiError struct {
 }
 
 type (
-	PermissionDenied struct{}
-	NotFound         struct{}
-)
-
-type (
 	HTTPError interface {
 		ErrorObj() any
 		StatusCode() int
@@ -29,6 +24,8 @@ type ErrorCode string
 const (
 	InternalErrorCode       ErrorCode = "internal_error"
 	InvalidRequestErrorCode ErrorCode = "invalid_request"
+	UnauthorizedErrorCode   ErrorCode = "unauthorized"
+	ForbiddenErrorCode      ErrorCode = "forbidden"
 )
 
 type ValidationError struct {
@@ -108,6 +105,28 @@ func NewNotFoundError(errorCode ErrorCode, message string, details string) HTTPE
 	}
 }
 
+// NewUnauthorizedError is the answer to a request that carries no usable
+// credentials: the caller may retry after authenticating.
+func NewUnauthorizedError(message string) HTTPError {
+	return HTTPApiError{
+		Code:      http.StatusUnauthorized,
+		Message:   message,
+		ErrorCode: UnauthorizedErrorCode,
+		Details:   "Unauthorized",
+	}
+}
+
+// NewForbiddenError is the answer to an authenticated request the caller is not
+// allowed to make: retrying with the same credentials will not help.
+func NewForbiddenError(errorCode ErrorCode, message string, details string) HTTPError {
+	return HTTPApiError{
+		Code:      http.StatusForbidden,
+		Message:   message,
+		ErrorCode: errorCode,
+		Details:   details,
+	}
+}
+
 type ConfigurableHTTPError struct {
 	OriginalError error
 	matched       HTTPError
@@ -121,12 +140,32 @@ type ErrorGroup interface {
 	IsNotFound() bool
 }
 
+// UnauthorizedGroup is implemented by the service errors asking the caller to
+// authenticate, bb.UnauthorizedError among them.
+type UnauthorizedGroup interface {
+	IsUnauthorized() bool
+}
+
 func (c ConfigurableHTTPError) IfNotFound(err HTTPError) ConfigurableHTTPError {
 	if err == nil {
 		return c
 	}
 
 	if e, ok := c.OriginalError.(ErrorGroup); ok && e.IsNotFound() {
+		c.matched = err
+	}
+
+	return c
+}
+
+// IfUnauthorized answers with err when the service error asks the caller to
+// authenticate.
+func (c ConfigurableHTTPError) IfUnauthorized(err HTTPError) ConfigurableHTTPError {
+	if err == nil {
+		return c
+	}
+
+	if e, ok := c.OriginalError.(UnauthorizedGroup); ok && e.IsUnauthorized() {
 		c.matched = err
 	}
 

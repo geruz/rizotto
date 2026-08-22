@@ -21,8 +21,8 @@ type SVGController struct {
 	}
 }
 
-func noAuth(ctx gateway.HTTPContext) gateway.HTTPContext {
-	return ctx
+func noAuth(ctx gateway.HTTPContext) (gateway.HTTPContext, gateway.HTTPError) {
+	return ctx, nil
 }
 
 func NewSVGController() SVGController {

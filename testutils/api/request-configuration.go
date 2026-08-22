@@ -23,6 +23,14 @@ type (
 		payload     any
 	}
 	QueryParams string
+	Header      struct {
+		key   string
+		value string
+	}
+	CookieParam struct {
+		name  string
+		value string
+	}
 )
 
 const jsonContentType = "application/json"
@@ -53,6 +61,24 @@ func (b Body) apply(req *http.Request) error {
 	req.Body = io.NopCloser(bytes.NewReader(raw))
 	req.ContentLength = int64(len(raw))
 	req.Header.Set("Content-Type", b.contentType)
+
+	return nil
+}
+
+func (h Header) apply(req *http.Request) error {
+	req.Header.Set(h.key, h.value)
+
+	return nil
+}
+
+func (c CookieParam) apply(req *http.Request) error {
+	// A cookie travelling on a request carries only its name and value: Secure,
+	// HttpOnly and SameSite are instructions to the browser, set by the answer.
+	//nolint:exhaustruct_v5,gosec // G124 is about response cookies
+	req.AddCookie(&http.Cookie{
+		Name:  c.name,
+		Value: c.value,
+	})
 
 	return nil
 }
@@ -109,6 +135,32 @@ func (h RequestConfiguration) WithJSONBody(payload any) RequestConfiguration {
 
 func (h RequestConfiguration) WithQuery(params string) RequestConfiguration {
 	h.configurations = append(h.configurations, QueryParams(params))
+
+	return h
+}
+
+// WithHeader sends one header with the request.
+func (h RequestConfiguration) WithHeader(key, value string) RequestConfiguration {
+	h.configurations = append(h.configurations, Header{
+		key:   key,
+		value: value,
+	})
+
+	return h
+}
+
+// WithBearer authenticates the request with a bearer token.
+func (h RequestConfiguration) WithBearer(token string) RequestConfiguration {
+	return h.WithHeader("Authorization", "Bearer "+token)
+}
+
+// WithCookie sends one cookie with the request, which is how a session reaches an
+// area function in a route test.
+func (h RequestConfiguration) WithCookie(name, value string) RequestConfiguration {
+	h.configurations = append(h.configurations, CookieParam{
+		name:  name,
+		value: value,
+	})
 
 	return h
 }
