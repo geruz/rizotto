@@ -2,10 +2,6 @@ version: "3"
 dotenv: [".env"]
 vars:
     SQLC_VERSION: 1.26.0
-includes:
-    users:
-        taskfile: ./services/users/Taskfile.yml
-        dir: ./services/users
 tasks:
     start:
         cmds:
@@ -19,8 +15,33 @@ tasks:
         silent: true
 
     migrate-up:
+        desc: Apply the migrations of every service
         cmds:
-            - task: users:migrate-up
+            - task: migrate
+              vars: { COMMAND: migrate }
+
+    migrate-down:
+        desc: Roll back the last migration of every service
+        cmds:
+            - task: migrate
+              vars: { COMMAND: rollback }
+
+    migrate:
+        internal: true
+        desc: Run dbmate over the migrations of every service
+        cmds:
+            - |
+                set -e
+                for dir in services/*/repository/migrations; do
+                    [ -d "$dir" ] || continue
+                    service=$(basename "$(dirname "$(dirname "$dir")")")
+                    echo "dbmate {{.COMMAND}} $service"
+                    dbmate -u "${OWNER_DATABASE_URL:-$DATABASE_URL}" \
+                        --migrations-dir "$dir" \
+                        --migrations-table "public.dbmate_migrations_${service}" \
+                        --no-dump-schema --wait {{.COMMAND}}
+                done
+
     gen:
         cmds:
             - PATH="$(go env GOPATH)/bin:$PATH" go generate ./...
