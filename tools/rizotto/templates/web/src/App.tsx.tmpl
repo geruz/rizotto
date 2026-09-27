@@ -1,0 +1,24 @@
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+
+export function App() {
+    return (
+        <main className="flex min-h-svh items-center justify-center p-6">
+            <Card className="w-full max-w-md">
+                <CardHeader>
+                    <CardTitle>{{.Name}}</CardTitle>
+                    <CardDescription>
+                        Edit <code>web/src/App.tsx</code>. Requests to <code>/api</code> reach the server
+                        started with <code>task start</code>.
+                    </CardDescription>
+                </CardHeader>
+                <CardContent className="text-muted-foreground">
+                    Components come from shadcn/ui: add more with <code>npx shadcn add &lt;name&gt;</code>.
+                </CardContent>
+                <CardFooter>
+                    <Button nativeButton={false} render={<a href="https://ui.shadcn.com/docs/components" />}>Browse components</Button>
+                </CardFooter>
+            </Card>
+        </main>
+    );
+}

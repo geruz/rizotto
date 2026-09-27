@@ -98,6 +98,28 @@ func Test_runService_FindsTheProjectFromASubdirectory(t *testing.T) {
 	must.StrContains(t, readFile(t, root, "services/order/order-client/client.go"), "package order")
 }
 
+func Test_findProject_FindsTheServerModuleFromTheRepository(t *testing.T) {
+	t.Parallel()
+
+	repo := t.TempDir()
+	server := filepath.Join(repo, serverDir)
+	web := filepath.Join(repo, webDir, "src")
+
+	for _, dir := range []string{server, web} {
+		must.NoError(t, os.MkdirAll(dir, dirPerm))
+	}
+
+	err := os.WriteFile(filepath.Join(server, "go.mod"), []byte("module "+testModule+"\n"), filePerm)
+	must.NoError(t, err)
+
+	for _, start := range []string{repo, server, web} {
+		root, module, err := findProject(start)
+		must.NoError(t, err, must.Sprintf("start %s", start))
+		must.Eq(t, server, root, must.Sprintf("start %s", start))
+		must.Eq(t, testModule, module)
+	}
+}
+
 func Test_runService_RejectsBadInput(t *testing.T) {
 	t.Parallel()
 

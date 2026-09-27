@@ -25,7 +25,9 @@ type project struct {
 	Slug string
 	// Repo is the git repository of the project, normalised to a go module path.
 	Repo string
-	// Module is the go module path of the generated project; it follows the repository.
+	// Module is the go module path of the generated project. The module lives in
+	// the server directory of the repository, so it is the repository followed by
+	// that directory, the way go resolves a nested module.
 	Module string
 	// GoVersion goes into the go directive of the generated go.mod.
 	GoVersion string
@@ -165,7 +167,7 @@ func newProject(name, repo, goVersion, rizottoPath string, withSQL bool) (projec
 		Name:          name,
 		Slug:          strings.ToLower(name),
 		Repo:          module,
-		Module:        module,
+		Module:        module + "/" + serverDir,
 		GoVersion:     goVersion,
 		RizottoPath:   rizottoPath,
 		RizottoModule: rizottoModule,

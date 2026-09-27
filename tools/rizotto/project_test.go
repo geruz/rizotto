@@ -61,7 +61,7 @@ func Test_newProject(t *testing.T) {
 	must.NoError(t, err)
 	must.Eq(t, "MyShop", prj.Name)
 	must.Eq(t, "myshop", prj.Slug)
-	must.Eq(t, "github.com/acme/shop", prj.Module)
+	must.Eq(t, "github.com/acme/shop/server", prj.Module)
 	must.Eq(t, "github.com/acme/shop", prj.Repo)
 	must.Eq(t, rizottoModule, prj.RizottoModule)
 	must.True(t, prj.SQL)

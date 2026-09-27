@@ -1,7 +1,8 @@
 # rizotto
 
-rizotto is a small Go framework for HTTP services. A project built with it is made
-of three kinds of building blocks:
+rizotto is a small Go framework for HTTP services. A project built with it is a
+repository of two parts: the go server in `server/` and its React app in `web/`.
+The server is made of three kinds of building blocks:
 
 - **services** — the business logic, reachable through generated RPC clients;
 - **controllers** — the HTTP layer translating requests into RPC calls;
@@ -28,10 +29,16 @@ storage in particular are solutions, not something to assemble out of
 
 ## Project layout
 
-    server.go                       bootstrap: settings, services, routes
+    Taskfile.yml                    forwards to server/ and web/: deps | start | test | lint | gen | migrate-up | web:dev | web:build
     .claude/skills/rizotto/         the Claude Code skill pointing back at these commands
+    server/                         the go module, <repository>/server
+    web/                            the React app: Vite, TypeScript, Tailwind and shadcn/ui
+
+Inside `server/`:
+
+    server.go                       bootstrap: settings, services, routes
     .env / .env.example             configuration, .env imports .env.example
-    Taskfile.yml                    task deps | start | test | lint | gen | migrate-up
+    Taskfile.yml                    the server tasks, run in server/
     sqlc.yaml                       one entry per service that owns a table
     api/controller.go               HTTP contexts shared by the controllers
     api/doc/                        the OpenAPI document the route tests fill in
@@ -39,6 +46,19 @@ storage in particular are solutions, not something to assemble out of
     services/<name>/                one service: the RPC implementation
     services/<name>/<name>-client/  its contract; bind-gen.go is generated from client.go
     services/<name>/repository/     sqlc queries, generated db package, dbmate migrations
+
+Every path the other skills name (`server.go`, `api/...`, `services/...`,
+`sqlc.yaml`, `.env.example`) is relative to `server/`. The commands find the
+module from anywhere in the repository: they walk up to the nearest `go.mod`, and
+a `server/go.mod` on the way counts.
+
+Inside `web/`:
+
+    src/App.tsx                     the first page
+    src/components/ui/              shadcn/ui components; add more with npx shadcn add <name>
+    src/lib/utils.ts                cn(), which the components merge their classes with
+    components.json                 the shadcn/ui configuration
+    vite.config.ts                  the @ alias and the /api proxy to the server on :9090
 
 ## The bootstrap in server.go
 
@@ -105,8 +125,12 @@ from the standard `OTEL_EXPORTER_OTLP_*` variables.
 
 ## Everyday tasks
 
-    task deps          go mod tidy
-    task start         go run .
+Run from the repository root:
+
+    task deps          go mod tidy and npm install
+    task start         go run . in server/
+    task web:dev       the React app on :5173, /api proxied to the server
+    task web:build     the static build into web/dist
     task test          go test ./... with coverage; refreshes every openapi.yml
     task lint          golangci-lint run ./...
     task gen           regenerate bind-gen.go (genbind) and the sqlc queries (docker)

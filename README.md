@@ -28,8 +28,8 @@ Does the project need SQL (PostgreSQL + sqlc + dbmate)? [y/N]: y
 2. **Directory** — the project is created in `<directory>/<name>`.
 3. **Git repository** — any of `github.com/acme/shop`,
    `https://github.com/acme/shop.git` or `git@github.com:acme/shop.git`. The
-   repository becomes the go module path, so every import inside the project
-   follows it.
+   repository followed by `/server` becomes the go module path
+   (`github.com/acme/shop/server`), so every import inside the project follows it.
 4. **SQL** — answering yes adds the repository layer with sqlc queries and dbmate
    migrations.
 
@@ -47,10 +47,24 @@ skipped:
 | `-force`        | generate into an existing non-empty directory                             |
 | `-skip-tidy`    | do not run `go mod tidy` in the created project                           |
 
-The scaffold contains the settings, a sample `item` service with its client
+The project is a repository of two parts:
+
+    <name>/
+      Taskfile.yml   forwards to the Taskfiles of server/ and web/
+      server/        the go module, <repository>/server
+      web/           the React app: Vite, TypeScript, Tailwind and shadcn/ui
+
+`server/` contains the settings, a sample `item` service with its client
 bindings (the same code `service add` writes), the shared HTTP contexts in
 `api/controller.go` and the OpenAPI document in `api/doc`. Controllers are added
-separately with `rizotto controller add`.
+separately with `rizotto controller add`. The go module lives in `server/`, so its
+path is the repository followed by `/server`.
+
+`web/` is the result of `shadcn init` on a Vite app, with the `button` and `card`
+components; `task web:dev` serves it on :5173 and proxies `/api` to the server.
+
+`service add`, `controller add` and `solution add` work from anywhere in the
+repository: walking up to the nearest `go.mod`, they also look into `server/`.
 
 Run `rizotto help` for the full list.
 

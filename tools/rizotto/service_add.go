@@ -150,7 +150,9 @@ func resolveDB(flagValue string, pr *prompter) (bool, error) {
 }
 
 // findProject walks up from the given directory looking for the go.mod of the
-// project and returns its root and module path.
+// project and returns its root and module path. The go module of a project lives
+// in its server directory, so on the way up server/go.mod counts as well: that is
+// what lets the commands run from the repository root or from web/.
 func findProject(start string) (string, string, error) {
 	dir, err := normalizePath(start)
 	if err != nil {
@@ -158,14 +160,18 @@ func findProject(start string) (string, string, error) {
 	}
 
 	for {
-		content, err := os.ReadFile(filepath.Join(dir, "go.mod")) //nolint:gosec // the path is chosen by the author
-		if err == nil {
-			module := moduleRe.FindSubmatch(content)
-			if module == nil {
-				return "", "", fmt.Errorf("%w: %s", errNotAModule, filepath.Join(dir, "go.mod"))
+		for _, root := range []string{dir, filepath.Join(dir, serverDir)} {
+			content, err := os.ReadFile(filepath.Join(root, "go.mod")) //nolint:gosec // the path is chosen by the author
+			if err != nil {
+				continue
 			}
 
-			return dir, string(module[1]), nil
+			module := moduleRe.FindSubmatch(content)
+			if module == nil {
+				return "", "", fmt.Errorf("%w: %s", errNotAModule, filepath.Join(root, "go.mod"))
+			}
+
+			return root, string(module[1]), nil
 		}
 
 		parent := filepath.Dir(dir)

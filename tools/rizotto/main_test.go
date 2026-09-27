@@ -37,8 +37,9 @@ func Test_runMakeProject_AsksEveryStep(t *testing.T) {
 	must.StrContains(t, printed, "Does the project need SQL")
 	must.StrContains(t, printed, `Created project "MyShop" (with SQL)`)
 
-	must.FileExists(t, filepath.Join(root, "MyShop", "server.go"))
-	must.FileExists(t, filepath.Join(root, "MyShop", "sqlc.yaml"))
+	must.FileExists(t, filepath.Join(root, "MyShop", "server", "server.go"))
+	must.FileExists(t, filepath.Join(root, "MyShop", "server", "sqlc.yaml"))
+	must.FileExists(t, filepath.Join(root, "MyShop", "web", "package.json"))
 }
 
 func Test_runMakeProject_RepeatsAWrongAnswer(t *testing.T) {
@@ -55,7 +56,7 @@ func Test_runMakeProject_RepeatsAWrongAnswer(t *testing.T) {
 	must.StrContains(t, printed, "english letters and digits")
 	must.StrContains(t, printed, "expected a repository like github.com/acme/shop")
 	must.StrContains(t, printed, `Created project "MyShop" (without SQL)`)
-	must.FileExists(t, filepath.Join(root, "MyShop", "server.go"))
+	must.FileExists(t, filepath.Join(root, "MyShop", "server", "server.go"))
 }
 
 func Test_runMakeProject_FlagsSkipTheQuestions(t *testing.T) {
@@ -68,7 +69,7 @@ func Test_runMakeProject_FlagsSkipTheQuestions(t *testing.T) {
 	err := runMakeProject(args, strings.NewReader(""), out)
 	must.NoError(t, err)
 	must.StrNotContains(t, out.String(), "Project name")
-	must.FileExists(t, filepath.Join(root, testName, "go.mod"))
+	must.FileExists(t, filepath.Join(root, testName, "server", "go.mod"))
 
 	// a second run must not silently overwrite an existing project
 	err = runMakeProject(args, strings.NewReader(""), out)

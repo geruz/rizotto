@@ -1,0 +1,19 @@
+version: "3"
+tasks:
+    deps:
+        desc: Install the node dependencies
+        cmds:
+            - npm install
+        silent: true
+
+    dev:
+        desc: Run the dev server, proxying /api to the go server
+        cmds:
+            - npm run dev
+        silent: true
+
+    build:
+        desc: Type-check and build the app into dist/
+        cmds:
+            - npm run build
+        silent: true

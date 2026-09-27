@@ -1,0 +1,22 @@
+import path from "node:path";
+
+import tailwindcss from "@tailwindcss/vite";
+import react from "@vitejs/plugin-react";
+import { defineConfig } from "vite";
+
+// During development the requests to /api go to the server started with
+// "task start", so the app and the API share one origin and its cookies.
+export default defineConfig({
+    plugins: [react(), tailwindcss()],
+    resolve: {
+        alias: {
+            "@": path.resolve(import.meta.dirname, "./src"),
+        },
+    },
+    server: {
+        port: 5173,
+        proxy: {
+            "/api": "http://localhost:9090",
+        },
+    },
+});

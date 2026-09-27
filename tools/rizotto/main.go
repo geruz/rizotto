@@ -183,7 +183,7 @@ func runMakeProject(args []string, in io.Reader, out io.Writer) error {
 	report(out, prj, target, files)
 
 	if !flags.skipTidy {
-		tidy(out, target)
+		tidy(out, filepath.Join(target, serverDir))
 	}
 
 	printNextSteps(out, prj, target)
@@ -347,10 +347,12 @@ func tidy(out io.Writer, target string) {
 }
 
 func printNextSteps(out io.Writer, prj project, target string) {
-	steps := []string{"cd " + target, "task deps", "task start"}
+	steps := []string{"cd " + target, "task deps"}
 	if prj.SQL {
-		steps = []string{"cd " + target, "task deps", "task migrate-up", "task start"}
+		steps = append(steps, "task migrate-up")
 	}
+
+	steps = append(steps, "task start      # the server on :9090", "task web:dev    # the React app on :5173")
 
 	_, _ = fmt.Fprintln(out, "\nNext steps:")
 

@@ -27,30 +27,44 @@ func Test_generate_ProjectWithoutSQL(t *testing.T) {
 
 	mustHaveFiles(t, target, files,
 		".claude/skills/rizotto/SKILL.md",
-		".env",
 		".gitignore",
-		".golangci.yml",
 		"README.md",
 		"Taskfile.yml",
-		"api/controller.go",
-		"api/doc/main.go",
-		"go.mod",
-		"server.go",
-		"services/item/item-client/bind-gen.go",
-		"services/item/item-client/client.go",
-		"services/item/item-service.go",
+		"server/.env",
+		"server/.golangci.yml",
+		"server/Taskfile.yml",
+		"server/api/controller.go",
+		"server/api/doc/main.go",
+		"server/go.mod",
+		"server/server.go",
+		"server/services/item/item-client/bind-gen.go",
+		"server/services/item/item-client/client.go",
+		"server/services/item/item-service.go",
+		"web/Taskfile.yml",
+		"web/components.json",
+		"web/package.json",
+		"web/src/App.tsx",
+		"web/src/components/ui/button.tsx",
+		"web/src/lib/utils.ts",
+		"web/vite.config.ts",
 	)
 
-	for _, notGenerated := range []string{"sqlc.yaml", "services/item/repository/db/db.go"} {
+	for _, notGenerated := range []string{"server/sqlc.yaml", "server/services/item/repository/db/db.go"} {
 		must.SliceNotContains(t, files, notGenerated)
 	}
 
-	must.StrContains(t, readFile(t, target, "go.mod"), "module "+testRepo+"\n")
-	must.StrNotContains(t, readFile(t, target, ".env"), "DATABASE_URL")
-	must.StrContains(t, readFile(t, target, ".env.example"), "SERVICE_NAME=myshop")
-	must.StrContains(t, readFile(t, target, "server.go"), "itemsrv.NewItemService()")
-	must.StrContains(t, readFile(t, target, "services/item/item-service.go"), "[]item.Item")
-	must.StrContains(t, readFile(t, target, "services/item/item-client/client.go"), "http://item-service/item/get")
+	must.StrContains(t, readFile(t, target, "server/go.mod"), "module "+testRepo+"/server\n")
+	must.StrNotContains(t, readFile(t, target, "server/.env"), "DATABASE_URL")
+	must.StrContains(t, readFile(t, target, "server/.env.example"), "SERVICE_NAME=myshop")
+	must.StrContains(t, readFile(t, target, "server/server.go"), "itemsrv.NewItemService()")
+	must.StrContains(t, readFile(t, target, "server/services/item/item-service.go"), "[]item.Item")
+	must.StrContains(t, readFile(t, target, "server/services/item/item-client/client.go"),
+		"http://item-service/item/get")
+
+	must.StrContains(t, readFile(t, target, "web/package.json"), `"name": "myshop-web"`)
+	must.StrContains(t, readFile(t, target, "web/vite.config.ts"), `"/api": "http://localhost:9090"`)
+	must.StrContains(t, readFile(t, target, "web/src/App.tsx"), "<CardTitle>MyShop</CardTitle>")
+	must.StrNotContains(t, readFile(t, target, "Taskfile.yml"), "migrate-up")
 
 	skill := readFile(t, target, ".claude/skills/rizotto/SKILL.md")
 	must.StrContains(t, skill, "name: rizotto")
@@ -67,20 +81,21 @@ func Test_generate_ProjectWithSQL(t *testing.T) {
 	must.NoError(t, err)
 
 	mustHaveFiles(t, target, files,
-		"sqlc.yaml",
-		"services/item/repository/db/db.go",
-		"services/item/repository/db/item-queries.sql.go",
-		"services/item/repository/db/models.go",
-		"services/item/repository/item-repository.go",
-		"services/item/repository/migrations/000001_create_items.sql",
-		"services/item/repository/sql/item-queries.sql",
-		"services/item/repository/sql/schema.sql",
+		"server/sqlc.yaml",
+		"server/services/item/repository/db/db.go",
+		"server/services/item/repository/db/item-queries.sql.go",
+		"server/services/item/repository/db/models.go",
+		"server/services/item/repository/item-repository.go",
+		"server/services/item/repository/migrations/000001_create_items.sql",
+		"server/services/item/repository/sql/item-queries.sql",
+		"server/services/item/repository/sql/schema.sql",
 	)
 
-	must.StrContains(t, readFile(t, target, ".env"), "postgres://postgres:postgres@localhost:5432/myshop")
-	must.StrContains(t, readFile(t, target, "server.go"), "pg.MustOpenConnection")
-	must.StrContains(t, readFile(t, target, "Taskfile.yml"), "{{.SQLC_VERSION}}")
-	must.StrContains(t, readFile(t, target, "services/item/item-service.go"), "repository.NewItemRepository")
+	must.StrContains(t, readFile(t, target, "server/.env"), "postgres://postgres:postgres@localhost:5432/myshop")
+	must.StrContains(t, readFile(t, target, "server/server.go"), "pg.MustOpenConnection")
+	must.StrContains(t, readFile(t, target, "server/Taskfile.yml"), "{{.SQLC_VERSION}}")
+	must.StrContains(t, readFile(t, target, "Taskfile.yml"), "task -d server migrate-up")
+	must.StrContains(t, readFile(t, target, "server/services/item/item-service.go"), "repository.NewItemRepository")
 }
 
 func Test_generate_NoControllerIsScaffolded(t *testing.T) {
@@ -95,7 +110,7 @@ func Test_generate_NoControllerIsScaffolded(t *testing.T) {
 		must.False(t, strings.Contains(file, "item-api"), must.Sprintf("unexpected controller file %s", file))
 	}
 
-	must.StrNotContains(t, readFile(t, target, "server.go"), "NewItemController")
+	must.StrNotContains(t, readFile(t, target, "server/server.go"), "NewItemController")
 }
 
 func Test_generate_ImportsFollowTheRepository(t *testing.T) {
@@ -109,13 +124,13 @@ func Test_generate_ImportsFollowTheRepository(t *testing.T) {
 	_, err = generateProject(prj, target)
 	must.NoError(t, err)
 
-	gomod := readFile(t, target, "go.mod")
-	must.StrContains(t, gomod, "module gitlab.com/acme/shop\n")
+	gomod := readFile(t, target, "server/go.mod")
+	must.StrContains(t, gomod, "module gitlab.com/acme/shop/server\n")
 	must.StrContains(t, gomod, "go 1.25.0\n")
 	must.StrContains(t, gomod, "replace "+rizottoModule+" => ")
-	must.StrContains(t, readFile(t, target, "server.go"), `itemsrv "gitlab.com/acme/shop/services/item"`)
-	must.StrContains(t, readFile(t, target, "services/item/item-service.go"),
-		`"gitlab.com/acme/shop/services/item/repository"`)
+	must.StrContains(t, readFile(t, target, "server/server.go"), `itemsrv "gitlab.com/acme/shop/server/services/item"`)
+	must.StrContains(t, readFile(t, target, "server/services/item/item-service.go"),
+		`"gitlab.com/acme/shop/server/services/item/repository"`)
 }
 
 func mustNewProject(t *testing.T, name string, withSQL bool) project {
