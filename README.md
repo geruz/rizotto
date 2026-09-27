@@ -46,6 +46,11 @@ skipped:
 | `-go-version`   | `go` directive of the generated `go.mod` (default: the running toolchain) |
 | `-force`        | generate into an existing non-empty directory                             |
 | `-skip-tidy`    | do not run `go mod tidy` in the created project                           |
+| `-skip-git`     | do not run `git init` in the created project                              |
+
+Unless `-skip-git` is given, the created project is initialised as an empty git
+repository; the step is skipped when git is not installed or the target already
+lives inside another repository.
 
 The project is a repository of two parts:
 

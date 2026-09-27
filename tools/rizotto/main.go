@@ -126,6 +126,7 @@ type makeProjectFlags struct {
 	goVersion   string
 	force       bool
 	skipTidy    bool
+	skipGit     bool
 }
 
 func bindMakeProjectFlags(fs *flag.FlagSet) *makeProjectFlags {
@@ -142,6 +143,7 @@ func bindMakeProjectFlags(fs *flag.FlagSet) *makeProjectFlags {
 	fs.StringVar(&f.goVersion, "go-version", "", "go directive of the generated go.mod (default: the running toolchain)")
 	fs.BoolVar(&f.force, "force", false, "generate into an existing non-empty directory")
 	fs.BoolVar(&f.skipTidy, "skip-tidy", false, "do not run go mod tidy inside the created project")
+	fs.BoolVar(&f.skipGit, "skip-git", false, "do not initialise a git repository in the created project")
 
 	return f
 }
@@ -184,6 +186,10 @@ func runMakeProject(args []string, in io.Reader, out io.Writer) error {
 
 	if !flags.skipTidy {
 		tidy(out, filepath.Join(target, serverDir))
+	}
+
+	if !flags.skipGit {
+		initGit(out, target)
 	}
 
 	printNextSteps(out, prj, target)
@@ -344,6 +350,36 @@ func tidy(out io.Writer, target string) {
 			"If %s cannot be downloaded, set GOPRIVATE=%s or generate with -rizotto-path <local rizotto checkout>.\n",
 			rizottoModule, rizottoModule)
 	}
+}
+
+// initGit turns the created project into a git repository, unless git is missing
+// or the project already lives inside another repository.
+func initGit(out io.Writer, target string) {
+	_, err := exec.LookPath("git")
+	if err != nil {
+		return
+	}
+
+	inside := exec.CommandContext(context.Background(), "git", "rev-parse", "--is-inside-work-tree")
+	inside.Dir = target
+
+	if inside.Run() == nil {
+		_, _ = fmt.Fprintf(out, "\n%s is already inside a git repository, git init skipped\n", target)
+
+		return
+	}
+
+	cmd := exec.CommandContext(context.Background(), "git", "init")
+	cmd.Dir = target
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		_, _ = fmt.Fprintf(out, "\ngit init failed, run it yourself:\n%s\n", output)
+
+		return
+	}
+
+	_, _ = fmt.Fprintln(out, "\nInitialised an empty git repository in "+target)
 }
 
 func printNextSteps(out io.Writer, prj project, target string) {

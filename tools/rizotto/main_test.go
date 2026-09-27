@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -74,6 +76,31 @@ func Test_runMakeProject_FlagsSkipTheQuestions(t *testing.T) {
 	// a second run must not silently overwrite an existing project
 	err = runMakeProject(args, strings.NewReader(""), out)
 	must.Error(t, err)
+}
+
+func Test_runMakeProject_InitialisesGit(t *testing.T) {
+	t.Parallel()
+
+	_, err := exec.LookPath("git")
+	if err != nil {
+		t.Skip("git is not installed")
+	}
+
+	root := t.TempDir()
+	out := &bytes.Buffer{}
+	args := []string{nameFlag, testName, pathFlag, root, repoFlag, testRepo, sqlFlag, "no", skipTidyFlag}
+
+	err = runMakeProject(args, strings.NewReader(""), out)
+	must.NoError(t, err)
+	must.DirExists(t, filepath.Join(root, testName, ".git"))
+
+	other := t.TempDir()
+	args = []string{nameFlag, testName, pathFlag, other, repoFlag, testRepo, sqlFlag, "no", skipTidyFlag, "-skip-git"}
+
+	err = runMakeProject(args, strings.NewReader(""), out)
+	must.NoError(t, err)
+	_, err = os.Stat(filepath.Join(other, testName, ".git"))
+	must.ErrorIs(t, err, os.ErrNotExist)
 }
 
 func Test_runMakeProject_RejectsBadInput(t *testing.T) {
