@@ -12,12 +12,13 @@ import (
 )
 
 const (
-	skipTidyFlag = "-skip-tidy"
-	nameFlag     = "-name"
-	pathFlag     = "-path"
-	repoFlag     = "-repo"
-	sqlFlag      = "-sql"
-	invalidName  = "my-shop"
+	skipTidyFlag   = "-skip-tidy"
+	skipSkillsFlag = "-skip-skills"
+	nameFlag       = "-name"
+	pathFlag       = "-path"
+	repoFlag       = "-repo"
+	sqlFlag        = "-sql"
+	invalidName    = "my-shop"
 	// bareWord is a valid project name but not a valid repository.
 	bareWord = "shop"
 )
@@ -29,7 +30,7 @@ func Test_runMakeProject_AsksEveryStep(t *testing.T) {
 	out := &bytes.Buffer{}
 	answers := strings.Join([]string{testName, root, "git@github.com:acme/shop.git", "y", ""}, "\n")
 
-	err := runMakeProject([]string{skipTidyFlag}, strings.NewReader(answers), out)
+	err := runMakeProject([]string{skipTidyFlag, skipSkillsFlag}, strings.NewReader(answers), out)
 	must.NoError(t, err)
 
 	printed := out.String()
@@ -51,7 +52,7 @@ func Test_runMakeProject_RepeatsAWrongAnswer(t *testing.T) {
 	out := &bytes.Buffer{}
 	answers := strings.Join([]string{invalidName, "МагазинЪ", testName, root, bareWord, testRepo, "n", ""}, "\n")
 
-	err := runMakeProject([]string{skipTidyFlag}, strings.NewReader(answers), out)
+	err := runMakeProject([]string{skipTidyFlag, skipSkillsFlag}, strings.NewReader(answers), out)
 	must.NoError(t, err)
 
 	printed := out.String()
@@ -66,7 +67,7 @@ func Test_runMakeProject_FlagsSkipTheQuestions(t *testing.T) {
 
 	root := t.TempDir()
 	out := &bytes.Buffer{}
-	args := []string{nameFlag, testName, pathFlag, root, repoFlag, testRepo, sqlFlag, "no", skipTidyFlag}
+	args := []string{nameFlag, testName, pathFlag, root, repoFlag, testRepo, sqlFlag, "no", skipTidyFlag, skipSkillsFlag}
 
 	err := runMakeProject(args, strings.NewReader(""), out)
 	must.NoError(t, err)
@@ -88,19 +89,50 @@ func Test_runMakeProject_InitialisesGit(t *testing.T) {
 
 	root := t.TempDir()
 	out := &bytes.Buffer{}
-	args := []string{nameFlag, testName, pathFlag, root, repoFlag, testRepo, sqlFlag, "no", skipTidyFlag}
+	args := []string{nameFlag, testName, pathFlag, root, repoFlag, testRepo, sqlFlag, "no", skipTidyFlag, skipSkillsFlag}
 
 	err = runMakeProject(args, strings.NewReader(""), out)
 	must.NoError(t, err)
 	must.DirExists(t, filepath.Join(root, testName, ".git"))
 
 	other := t.TempDir()
-	args = []string{nameFlag, testName, pathFlag, other, repoFlag, testRepo, sqlFlag, "no", skipTidyFlag, "-skip-git"}
+	args = []string{
+		nameFlag, testName, pathFlag, other, repoFlag, testRepo, sqlFlag, "no", skipTidyFlag, skipSkillsFlag, "-skip-git",
+	}
 
 	err = runMakeProject(args, strings.NewReader(""), out)
 	must.NoError(t, err)
 	_, err = os.Stat(filepath.Join(other, testName, ".git"))
 	must.ErrorIs(t, err, os.ErrNotExist)
+}
+
+func Test_runMakeProject_SurvivesAFailedSkillsInstall(t *testing.T) {
+	cases := map[string]string{
+		"no npx":               "",
+		"npx fails":            "#!/bin/sh\necho 'npm error network' >&2\nexit 1\n",
+		"npx installs nothing": "#!/bin/sh\nexit 0\n",
+	}
+
+	for name, script := range cases {
+		t.Run(name, func(t *testing.T) {
+			bin := t.TempDir()
+			if script != "" {
+				must.NoError(t, os.WriteFile(filepath.Join(bin, "npx"), []byte(script), 0o700)) //nolint:gosec // a test script
+			}
+
+			t.Setenv("PATH", bin)
+
+			root := t.TempDir()
+			out := &bytes.Buffer{}
+			args := []string{nameFlag, testName, pathFlag, root, repoFlag, testRepo, sqlFlag, "no", skipTidyFlag}
+
+			err := runMakeProject(args, strings.NewReader(""), out)
+			must.NoError(t, err)
+			must.StrContains(t, out.String(), "npx skills add shadcn/ui")
+			must.StrContains(t, out.String(), "Next steps:")
+			must.FileExists(t, filepath.Join(root, testName, "web", "package.json"))
+		})
+	}
 }
 
 func Test_runMakeProject_RejectsBadInput(t *testing.T) {
@@ -119,7 +151,7 @@ func Test_runMakeProject_RejectsBadInput(t *testing.T) {
 	for name, args := range cases {
 		out := &bytes.Buffer{}
 
-		err := runMakeProject(append(args, skipTidyFlag), strings.NewReader(""), out)
+		err := runMakeProject(append(args, skipTidyFlag, skipSkillsFlag), strings.NewReader(""), out)
 		must.ErrorIs(t, err, errUsage, must.Sprintf("case %q", name))
 	}
 }
@@ -129,7 +161,7 @@ func Test_runMakeProject_FailsWithoutAnswers(t *testing.T) {
 
 	out := &bytes.Buffer{}
 
-	err := runMakeProject([]string{skipTidyFlag}, strings.NewReader(""), out)
+	err := runMakeProject([]string{skipTidyFlag, skipSkillsFlag}, strings.NewReader(""), out)
 	must.ErrorIs(t, err, errNoInput)
 }
 

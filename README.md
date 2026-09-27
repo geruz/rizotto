@@ -47,10 +47,14 @@ skipped:
 | `-force`        | generate into an existing non-empty directory                             |
 | `-skip-tidy`    | do not run `go mod tidy` in the created project                           |
 | `-skip-git`     | do not run `git init` in the created project                              |
+| `-skip-skills`  | do not run `npx skills add shadcn/ui` for the web app                     |
 
 Unless `-skip-git` is given, the created project is initialised as an empty git
 repository; the step is skipped when git is not installed or the target already
-lives inside another repository.
+lives inside another repository. When the project has the web app, the
+shadcn agent skill is then installed with `npx skills add shadcn/ui --skill shadcn --yes`.
+None of these steps fails the command: when one cannot run, the project is still
+created and the command to finish it by hand is printed.
 
 The project is a repository of two parts:
 

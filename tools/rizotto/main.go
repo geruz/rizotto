@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"time"
 )
 
 const toolUsage = `rizotto is the command line companion of the rizotto framework.
@@ -127,6 +128,7 @@ type makeProjectFlags struct {
 	force       bool
 	skipTidy    bool
 	skipGit     bool
+	skipSkills  bool
 }
 
 func bindMakeProjectFlags(fs *flag.FlagSet) *makeProjectFlags {
@@ -144,6 +146,7 @@ func bindMakeProjectFlags(fs *flag.FlagSet) *makeProjectFlags {
 	fs.BoolVar(&f.force, "force", false, "generate into an existing non-empty directory")
 	fs.BoolVar(&f.skipTidy, "skip-tidy", false, "do not run go mod tidy inside the created project")
 	fs.BoolVar(&f.skipGit, "skip-git", false, "do not initialise a git repository in the created project")
+	fs.BoolVar(&f.skipSkills, "skip-skills", false, "do not run npx skills add shadcn/ui for the web app")
 
 	return f
 }
@@ -190,6 +193,10 @@ func runMakeProject(args []string, in io.Reader, out io.Writer) error {
 
 	if !flags.skipGit {
 		initGit(out, target)
+	}
+
+	if !flags.skipSkills {
+		addWebSkills(out, target)
 	}
 
 	printNextSteps(out, prj, target)
@@ -380,6 +387,55 @@ func initGit(out io.Writer, target string) {
 	}
 
 	_, _ = fmt.Fprintln(out, "\nInitialised an empty git repository in "+target)
+}
+
+// skillsTimeout bounds npx skills add, which clones a repository and may stall
+// on a slow or missing network.
+const skillsTimeout = 5 * time.Minute
+
+// addWebSkills installs the shadcn/ui agent skill when the project has the web
+// app. It never fails the command: the project is already there, so a missing
+// npx, a network error or a timeout only print how to finish the step by hand.
+func addWebSkills(out io.Writer, target string) {
+	_, err := os.Stat(filepath.Join(target, webDir, "package.json"))
+	if err != nil {
+		return
+	}
+
+	const manual = "npx skills add shadcn/ui --skill shadcn"
+
+	_, err = exec.LookPath("npx")
+	if err != nil {
+		_, _ = fmt.Fprintln(out, "\nnpx is not installed, add the shadcn/ui skill yourself: "+manual)
+
+		return
+	}
+
+	_, _ = fmt.Fprintln(out, "\n"+manual)
+
+	ctx, cancel := context.WithTimeout(context.Background(), skillsTimeout)
+	defer cancel()
+
+	// --yes before skills keeps npx from asking to download the package, --skill
+	// picks shadcn out of the repository and the last --yes keeps skills from
+	// asking which agents to install to; stdin stays empty so that nothing waits
+	// for an answer.
+	cmd := exec.CommandContext(ctx, "npx", "--yes", "skills", "add", "shadcn/ui", "--skill", "shadcn", "--yes")
+	cmd.Dir = target
+	cmd.Stdout = out
+	cmd.Stderr = out
+
+	err = cmd.Run()
+	if err == nil {
+		// skills exits with 0 when it gives up on a prompt, so the result is
+		// checked on disk.
+		_, err = os.Stat(filepath.Join(target, ".agents", "skills", "shadcn", "SKILL.md"))
+	}
+
+	if err != nil {
+		_, _ = fmt.Fprintf(out, "\nthe shadcn/ui skill was not installed (%v), run it yourself in %s: %s\n",
+			err, target, manual)
+	}
 }
 
 func printNextSteps(out io.Writer, prj project, target string) {
