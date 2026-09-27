@@ -17,6 +17,7 @@ task web:dev     # run the React app on :5173, /api is proxied to the server
 task test        # run the server tests
 task lint        # run golangci-lint
 task gen         # regenerate the service bindings{{if .SQL}} and the sqlc queries{{end}}
+task docker:build # build the docker image {{.Slug}}: the server with the web app
 ```
 
 The root `Taskfile.yml` forwards to `server/Taskfile.yml` and `web/Taskfile.yml`;
@@ -48,6 +49,7 @@ the conventions.
 
     Taskfile.yml                         forwards to the Taskfiles of server/ and web/
     .agents/skills/rizotto/              the agent skill describing how to work in this project
+    .docker/                             the Dockerfile of the image, its .dockerignore and the .env it ships
 
     server/                              the go module
     server/server.go                     wires the settings, the services and the HTTP routes
@@ -106,3 +108,19 @@ every service with [dbmate](https://github.com/amacneil/dbmate).
 proxies `/api` to the server on :9090, so in development the app and the API share
 one origin and the session cookie just works. `task web:build` writes the static
 build to `web/dist`.
+
+## Docker
+
+`task docker:build` builds the image `{{.Slug}}` from `.docker/Dockerfile`: the web
+app is built with node, the server with go, and both land in one distroless image.
+There the server reads `.docker/env` as its `.env`, which sets `STATIC_DIR`, so it
+serves the web app from `/` next to the API: a page of the app the browser asks
+for gets `index.html`, while a missing asset or API route stays 404.
+
+```sh
+docker run --rm -p 9090:9090{{if .SQL}} -e DATABASE_URL=postgres://...{{end}} {{.Slug}}
+```
+
+Any variable of `server/.env.example` can be overridden with `-e`. To try the same
+setup without docker, build the app and start the server with
+`STATIC_DIR=../web/dist`.

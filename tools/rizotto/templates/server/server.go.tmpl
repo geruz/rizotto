@@ -27,6 +27,13 @@ func main() {
 	})
 
 	gt := gateway.NewHTTPGateway()
+
+	// The docker image puts the built web app into STATIC_DIR; locally the app is
+	// served by "task web:dev" instead, and the variable stays empty.
+	staticDir := env.GetStringValue("STATIC_DIR", "")
+	if staticDir != "" {
+		gt = gt.Static("/", staticDir)
+	}
 {{if .SQL}}
 	pgPool := pg.MustOpenConnection(ctx, env.MustGetStringValue("DATABASE_URL"))
 

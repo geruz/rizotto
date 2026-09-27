@@ -60,3 +60,8 @@ tasks:
         cmds:
             - task -d web build
         silent: true
+
+    docker:build:
+        desc: Build the docker image with the server and the web app
+        cmds:
+            - docker build -f .docker/Dockerfile -t {{.Slug}} .

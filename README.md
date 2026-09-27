@@ -60,6 +60,7 @@ The project is a repository of two parts:
 
     <name>/
       Taskfile.yml   forwards to the Taskfiles of server/ and web/
+      .docker/       the Dockerfile building the server and the web app into one image
       server/        the go module, <repository>/server
       web/           the React app: Vite, TypeScript, Tailwind and shadcn/ui
 
@@ -71,6 +72,10 @@ path is the repository followed by `/server`.
 
 `web/` is the result of `shadcn init` on a Vite app, with the `button` and `card`
 components; `task web:dev` serves it on :5173 and proxies `/api` to the server.
+
+`task docker:build` builds one image of both parts from `.docker/Dockerfile`. In
+it the server serves the web build from `/` with `gateway.Static`, turned on by
+the `STATIC_DIR` variable of `.docker/env`.
 
 `service add`, `controller add` and `solution add` work from anywhere in the
 repository: walking up to the nearest `go.mod`, they also look into `server/`.

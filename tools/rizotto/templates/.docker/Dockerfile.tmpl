@@ -1,0 +1,34 @@
+# The image of the whole project: the go server together with the built web app,
+# which the server serves from / (see STATIC_DIR in .docker/env). Build it from
+# the project root:
+#
+#     task docker:build
+#     docker build -f .docker/Dockerfile -t {{.Slug}} .
+{{- if .RizottoPath}}
+#
+# server/go.mod replaces {{.RizottoModule}} with {{.RizottoPath}}, a directory
+# outside the build context: drop the replace directive before building the image.
+{{- end}}
+
+FROM node:22-alpine AS web
+WORKDIR /src/web
+COPY web/package*.json ./
+RUN if [ -f package-lock.json ]; then npm ci; else npm install; fi
+COPY web/ ./
+RUN npm run build
+
+FROM golang:{{.GoVersion}}-alpine AS server
+WORKDIR /src/server
+COPY server/go.* ./
+RUN go mod download
+COPY server/ ./
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/server .
+
+FROM gcr.io/distroless/static-debian12:nonroot
+WORKDIR /app
+COPY --from=server /out/server ./server
+COPY server/.env.example ./.env.example
+COPY .docker/env ./.env
+COPY --from=web /src/web/dist ./static
+EXPOSE 9090 9091
+ENTRYPOINT ["/app/server"]

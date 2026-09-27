@@ -27,6 +27,9 @@ func Test_generate_ProjectWithoutSQL(t *testing.T) {
 
 	mustHaveFiles(t, target, files,
 		".agents/skills/rizotto/SKILL.md",
+		".docker/Dockerfile",
+		".docker/Dockerfile.dockerignore",
+		".docker/env",
 		".gitignore",
 		"README.md",
 		"Taskfile.yml",
@@ -65,6 +68,10 @@ func Test_generate_ProjectWithoutSQL(t *testing.T) {
 	must.StrContains(t, readFile(t, target, "web/vite.config.ts"), `"/api": "http://localhost:9090"`)
 	must.StrContains(t, readFile(t, target, "web/src/App.tsx"), "<CardTitle>MyShop</CardTitle>")
 	must.StrNotContains(t, readFile(t, target, "Taskfile.yml"), "migrate-up")
+	must.StrContains(t, readFile(t, target, "Taskfile.yml"), "docker build -f .docker/Dockerfile -t myshop .")
+	must.StrContains(t, readFile(t, target, ".docker/Dockerfile"), "COPY --from=web /src/web/dist ./static")
+	must.StrContains(t, readFile(t, target, ".docker/env"), "STATIC_DIR=/app/static")
+	must.StrContains(t, readFile(t, target, "server/server.go"), `gt.Static("/", staticDir)`)
 
 	skill := readFile(t, target, ".agents/skills/rizotto/SKILL.md")
 	must.StrContains(t, skill, "name: rizotto")

@@ -29,15 +29,16 @@ storage in particular are solutions, not something to assemble out of
 
 ## Project layout
 
-    Taskfile.yml                    forwards to server/ and web/: deps | start | test | lint | gen | migrate-up | web:dev | web:build
+    Taskfile.yml                    forwards to server/ and web/: deps | start | test | lint | gen | migrate-up | web:dev | web:build | docker:build
     .agents/skills/rizotto/         the agent skill pointing back at these commands
+    .docker/                        Dockerfile (web and server in one image), its .dockerignore, the image .env
     server/                         the go module, <repository>/server
     web/                            the React app: Vite, TypeScript, Tailwind and shadcn/ui
 
 Inside `server/`:
 
     server.go                       bootstrap: settings, services, routes
-    .env / .env.example             configuration, .env imports .env.example
+    .env / .env.example             configuration, .env imports .env.example; STATIC_DIR serves a web build from /
     Taskfile.yml                    the server tasks, run in server/
     sqlc.yaml                       one entry per service that owns a table
     api/controller.go               HTTP contexts shared by the controllers
@@ -131,6 +132,7 @@ Run from the repository root:
     task start         go run . in server/
     task web:dev       the React app on :5173, /api proxied to the server
     task web:build     the static build into web/dist
+    task docker:build  the docker image: the server serving the web build from /
     task test          go test ./... with coverage; refreshes every openapi.yml
     task lint          golangci-lint run ./...
     task gen           regenerate bind-gen.go (genbind) and the sqlc queries (docker)
