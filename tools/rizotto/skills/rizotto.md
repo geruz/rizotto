@@ -30,7 +30,7 @@ storage in particular are solutions, not something to assemble out of
 ## Project layout
 
     Taskfile.yml                    forwards to server/ and web/: deps | start | test | lint | gen | migrate-up | web:dev | web:build
-    .claude/skills/rizotto/         the Claude Code skill pointing back at these commands
+    .agents/skills/rizotto/         the agent skill pointing back at these commands
     server/                         the go module, <repository>/server
     web/                            the React app: Vite, TypeScript, Tailwind and shadcn/ui
 

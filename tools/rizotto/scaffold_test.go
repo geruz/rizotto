@@ -26,7 +26,7 @@ func Test_generate_ProjectWithoutSQL(t *testing.T) {
 	must.NoError(t, err)
 
 	mustHaveFiles(t, target, files,
-		".claude/skills/rizotto/SKILL.md",
+		".agents/skills/rizotto/SKILL.md",
 		".gitignore",
 		"README.md",
 		"Taskfile.yml",
@@ -66,7 +66,7 @@ func Test_generate_ProjectWithoutSQL(t *testing.T) {
 	must.StrContains(t, readFile(t, target, "web/src/App.tsx"), "<CardTitle>MyShop</CardTitle>")
 	must.StrNotContains(t, readFile(t, target, "Taskfile.yml"), "migrate-up")
 
-	skill := readFile(t, target, ".claude/skills/rizotto/SKILL.md")
+	skill := readFile(t, target, ".agents/skills/rizotto/SKILL.md")
 	must.StrContains(t, skill, "name: rizotto")
 	must.StrContains(t, skill, "rizotto skill")
 }

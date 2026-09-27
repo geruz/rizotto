@@ -40,14 +40,14 @@ rizotto service skill      # services in detail
 rizotto controller skill   # controllers in detail
 ```
 
-`.claude/skills/rizotto/SKILL.md` points Claude Code at those same commands, so an
+`.agents/skills/rizotto/SKILL.md` points coding agents at those same commands, so an
 agent working in this repository asks the installed binary instead of guessing at
 the conventions.
 
 ## Layout
 
     Taskfile.yml                         forwards to the Taskfiles of server/ and web/
-    .claude/skills/rizotto/              the Claude Code skill describing how to work in this project
+    .agents/skills/rizotto/              the agent skill describing how to work in this project
 
     server/                              the go module
     server/server.go                     wires the settings, the services and the HTTP routes

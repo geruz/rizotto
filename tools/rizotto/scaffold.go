@@ -12,7 +12,7 @@ import (
 )
 
 // templatesFS holds the project templates. The all: prefix keeps the dot
-// directories, so that templates/.claude ships with the binary.
+// directories, so that templates/.agents ships with the binary.
 //
 //go:embed all:templates
 var templatesFS embed.FS
@@ -52,7 +52,7 @@ var projectFiles = []fileSpec{
 	{tmpl: "gitignore.tmpl", out: ".gitignore", sqlOnly: always},
 	{tmpl: "Taskfile.yml.tmpl", out: "Taskfile.yml", sqlOnly: always},
 	{tmpl: "README.md.tmpl", out: "README.md", sqlOnly: always},
-	{tmpl: ".claude/skills/rizotto/SKILL.md.tmpl", out: ".claude/skills/rizotto/SKILL.md", sqlOnly: always},
+	{tmpl: ".agents/skills/rizotto/SKILL.md.tmpl", out: ".agents/skills/rizotto/SKILL.md", sqlOnly: always},
 
 	{tmpl: "server/golangci.yml.tmpl", out: "server/.golangci.yml", sqlOnly: always},
 	{tmpl: "server/env.tmpl", out: "server/.env", sqlOnly: always},
