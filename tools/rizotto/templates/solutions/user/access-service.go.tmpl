@@ -1,0 +1,570 @@
+package usersrv
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"slices"
+	"strings"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"{{.RizottoModule}}/bb"
+	"{{.RizottoModule}}/pg"
+	"{{.RizottoModule}}/settings/env"
+	"{{.RizottoModule}}/validators"
+
+	"{{.PermissionsImport}}"
+	"{{.Module}}/{{.Dir}}/repository"
+	"{{.Module}}/{{.Dir}}/repository/db"
+	access "{{.AccessClientImport}}"
+	user "{{.ClientImport}}"
+)
+
+const (
+	// adminRoleName is the role granted every permission, and adminGroupName the
+	// group the users of ADMIN_EMAILS are put in.
+	adminRoleName  = "admin"
+	adminGroupName = "admins"
+	// maxNameLength is the size of the name columns.
+	maxNameLength = 255
+	// defaultUsersLimit and maxUsersLimit bound a page of ListUsersRPC.
+	defaultUsersLimit = 20
+	maxUsersLimit     = 100
+)
+
+var (
+	errSharedAdminEmail  = errors.New("several users share an email of ADMIN_EMAILS")
+	errInvalidAdminEmail = errors.New("invalid email in ADMIN_EMAILS")
+)
+
+// AccessService owns the groups, the roles and what they grant.
+type AccessService struct {
+	repo repository.AccessRepository
+}
+
+func NewAccessService(pool *pgxpool.Pool) AccessService {
+	return AccessService{repo: repository.NewAccessRepository(pool)}
+}
+
+// MustBootstrapAdmins puts the users of ADMIN_EMAILS into the admins group, whose
+// admin role is granted every permission of the project. A user missing yet is
+// created. It runs at every start, so that the admins cannot lock themselves out
+// for good and that a permission added to the code reaches them. It panics when
+// that fails, so a misconfigured deployment stops before serving anything.
+func (srv AccessService) MustBootstrapAdmins(ctx context.Context) {
+	err := srv.bootstrapAdmins(ctx, adminEmails(env.GetStringValue("ADMIN_EMAILS", "")))
+	if err != nil {
+		panic(fmt.Errorf("bootstrap the admins: %w", err))
+	}
+}
+
+func (srv AccessService) GetUserPermissionsRPC(
+	ctx context.Context, req access.GetUserPermissionsRequest,
+) (access.UserPermissions, bb.ServiceError) {
+	if req.UserID <= 0 {
+		return access.UserPermissions{}, bb.NewInvalidRequestError("invalid user id")
+	}
+
+	granted, err := srv.repo.GetUserPermissions(ctx, int64(req.UserID))
+	if err != nil {
+		return access.UserPermissions{}, bb.NewInternalError("failed to read the permissions", err)
+	}
+
+	return access.UserPermissions{UserID: req.UserID, Permissions: nonNil(granted)}, nil
+}
+
+func (srv AccessService) ListUsersRPC(
+	ctx context.Context, req access.ListUsersRequest,
+) (access.UserList, bb.ServiceError) {
+	limit, offset := req.Limit, max(req.Offset, 0)
+	if limit <= 0 {
+		limit = defaultUsersLimit
+	}
+
+	limit = min(limit, maxUsersLimit)
+
+	rows, err := srv.repo.ListUsers(ctx, int64(offset), int64(limit))
+	if err != nil {
+		return access.UserList{}, bb.NewInternalError("failed to list the users", err)
+	}
+
+	users := make([]user.User, len(rows))
+	for i, row := range rows {
+		users[i] = toUser(row)
+	}
+
+	return access.UserList{Offset: offset, Limit: limit, Users: users}, nil
+}
+
+func (srv AccessService) ListRolesRPC(
+	ctx context.Context, _ access.ListRolesRequest,
+) (access.RoleList, bb.ServiceError) {
+	rows, err := srv.repo.ListRoles(ctx)
+	if err != nil {
+		return access.RoleList{}, bb.NewInternalError("failed to list the roles", err)
+	}
+
+	granted, err := srv.repo.ListAllRolePermissions(ctx)
+	if err != nil {
+		return access.RoleList{}, bb.NewInternalError("failed to list the permissions of the roles", err)
+	}
+
+	byRole := map[int64][]string{}
+	for _, row := range granted {
+		byRole[row.RoleID] = append(byRole[row.RoleID], row.Permission)
+	}
+
+	roles := make([]access.Role, len(rows))
+	for i, row := range rows {
+		roles[i] = toRole(row, byRole[row.ID])
+	}
+
+	return access.RoleList{Roles: roles}, nil
+}
+
+func (srv AccessService) CreateRoleRPC(
+	ctx context.Context, req access.CreateRoleRequest,
+) (access.Role, bb.ServiceError) {
+	name, granted, invalid := checkRole(req.Name, req.Permissions)
+	if invalid != nil {
+		return access.Role{}, invalid
+	}
+
+	row, err := srv.repo.CreateRole(ctx, name, granted)
+	if err != nil {
+		return access.Role{}, nameError(err, "failed to create the role")
+	}
+
+	return toRole(row, granted), nil
+}
+
+func (srv AccessService) UpdateRoleRPC(
+	ctx context.Context, req access.UpdateRoleRequest,
+) (access.Role, bb.ServiceError) {
+	if req.RoleID <= 0 {
+		return access.Role{}, bb.NewInvalidRequestError("invalid role id")
+	}
+
+	name, granted, invalid := checkRole(req.Name, req.Permissions)
+	if invalid != nil {
+		return access.Role{}, invalid
+	}
+
+	row, err := srv.repo.UpdateRole(ctx, int64(req.RoleID), name, granted)
+	if err != nil {
+		if pg.IsNotFoundError(err) {
+			return access.Role{}, bb.NewNotFoundError("role not found")
+		}
+
+		return access.Role{}, nameError(err, "failed to update the role")
+	}
+
+	return toRole(row, granted), nil
+}
+
+func (srv AccessService) DeleteRoleRPC(
+	ctx context.Context, req access.RoleRequest,
+) (access.DeletedRole, bb.ServiceError) {
+	if req.RoleID <= 0 {
+		return access.DeletedRole{}, bb.NewInvalidRequestError("invalid role id")
+	}
+
+	id, err := srv.repo.DeleteRole(ctx, int64(req.RoleID))
+	if err != nil {
+		if pg.IsNotFoundError(err) {
+			return access.DeletedRole{}, bb.NewNotFoundError("role not found")
+		}
+
+		return access.DeletedRole{}, bb.NewInternalError("failed to delete the role", err)
+	}
+
+	return access.DeletedRole{RoleID: int(id)}, nil
+}
+
+func (srv AccessService) ListGroupsRPC(
+	ctx context.Context, _ access.ListGroupsRequest,
+) (access.GroupList, bb.ServiceError) {
+	rows, err := srv.repo.ListGroups(ctx)
+	if err != nil {
+		return access.GroupList{}, bb.NewInternalError("failed to list the groups", err)
+	}
+
+	grants, err := srv.repo.ListAllGroupRoles(ctx)
+	if err != nil {
+		return access.GroupList{}, bb.NewInternalError("failed to list the roles of the groups", err)
+	}
+
+	members, err := srv.repo.ListAllGroupMembers(ctx)
+	if err != nil {
+		return access.GroupList{}, bb.NewInternalError("failed to list the members of the groups", err)
+	}
+
+	roleIDs := map[int64][]int64{}
+	for _, grant := range grants {
+		roleIDs[grant.GroupID] = append(roleIDs[grant.GroupID], grant.RoleID)
+	}
+
+	memberIDs := map[int64][]int64{}
+	for _, member := range members {
+		memberIDs[member.GroupID] = append(memberIDs[member.GroupID], member.UserID)
+	}
+
+	groups := make([]access.Group, len(rows))
+	for i, row := range rows {
+		groups[i] = toGroup(row, roleIDs[row.ID], memberIDs[row.ID])
+	}
+
+	return access.GroupList{Groups: groups}, nil
+}
+
+func (srv AccessService) GetGroupRPC(
+	ctx context.Context, req access.GroupRequest,
+) (access.Group, bb.ServiceError) {
+	if req.GroupID <= 0 {
+		return access.Group{}, bb.NewInvalidRequestError("invalid group id")
+	}
+
+	return srv.group(ctx, int64(req.GroupID))
+}
+
+func (srv AccessService) CreateGroupRPC(
+	ctx context.Context, req access.CreateGroupRequest,
+) (access.Group, bb.ServiceError) {
+	name, invalid := checkName(req.Name)
+	if invalid != nil {
+		return access.Group{}, invalid
+	}
+
+	row, err := srv.repo.CreateGroup(ctx, name)
+	if err != nil {
+		return access.Group{}, nameError(err, "failed to create the group")
+	}
+
+	return toGroup(row, nil, nil), nil
+}
+
+func (srv AccessService) UpdateGroupRPC(
+	ctx context.Context, req access.UpdateGroupRequest,
+) (access.Group, bb.ServiceError) {
+	if req.GroupID <= 0 {
+		return access.Group{}, bb.NewInvalidRequestError("invalid group id")
+	}
+
+	name, invalid := checkName(req.Name)
+	if invalid != nil {
+		return access.Group{}, invalid
+	}
+
+	_, err := srv.repo.UpdateGroup(ctx, int64(req.GroupID), name)
+	if err != nil {
+		if pg.IsNotFoundError(err) {
+			return access.Group{}, bb.NewNotFoundError("group not found")
+		}
+
+		return access.Group{}, nameError(err, "failed to update the group")
+	}
+
+	return srv.group(ctx, int64(req.GroupID))
+}
+
+func (srv AccessService) DeleteGroupRPC(
+	ctx context.Context, req access.GroupRequest,
+) (access.DeletedGroup, bb.ServiceError) {
+	if req.GroupID <= 0 {
+		return access.DeletedGroup{}, bb.NewInvalidRequestError("invalid group id")
+	}
+
+	id, err := srv.repo.DeleteGroup(ctx, int64(req.GroupID))
+	if err != nil {
+		if pg.IsNotFoundError(err) {
+			return access.DeletedGroup{}, bb.NewNotFoundError("group not found")
+		}
+
+		return access.DeletedGroup{}, bb.NewInternalError("failed to delete the group", err)
+	}
+
+	return access.DeletedGroup{GroupID: int(id)}, nil
+}
+
+// AddGroupMemberRPC puts the user into the group. Adding a member twice is not an
+// error: the user ends up a member either way.
+func (srv AccessService) AddGroupMemberRPC(
+	ctx context.Context, req access.GroupMemberRequest,
+) (access.Group, bb.ServiceError) {
+	invalid := srv.checkGroupAnd(ctx, req.GroupID, req.UserID, "user", srv.userExists)
+	if invalid != nil {
+		return access.Group{}, invalid
+	}
+
+	err := srv.repo.AddGroupMember(ctx, int64(req.GroupID), int64(req.UserID))
+	if err != nil {
+		return access.Group{}, bb.NewInternalError("failed to add the member", err)
+	}
+
+	return srv.group(ctx, int64(req.GroupID))
+}
+
+// RemoveGroupMemberRPC takes the user out of the group. Removing somebody who is
+// not a member is not an error.
+func (srv AccessService) RemoveGroupMemberRPC(
+	ctx context.Context, req access.GroupMemberRequest,
+) (access.Group, bb.ServiceError) {
+	if req.GroupID <= 0 || req.UserID <= 0 {
+		return access.Group{}, bb.NewInvalidRequestError("invalid group or user id")
+	}
+
+	err := srv.repo.RemoveGroupMember(ctx, int64(req.GroupID), int64(req.UserID))
+	if err != nil {
+		return access.Group{}, bb.NewInternalError("failed to remove the member", err)
+	}
+
+	return srv.group(ctx, int64(req.GroupID))
+}
+
+// GrantGroupRoleRPC gives the role to the group. Granting it twice is not an error.
+func (srv AccessService) GrantGroupRoleRPC(
+	ctx context.Context, req access.GroupRoleRequest,
+) (access.Group, bb.ServiceError) {
+	invalid := srv.checkGroupAnd(ctx, req.GroupID, req.RoleID, "role", srv.roleExists)
+	if invalid != nil {
+		return access.Group{}, invalid
+	}
+
+	err := srv.repo.AddGroupRole(ctx, int64(req.GroupID), int64(req.RoleID))
+	if err != nil {
+		return access.Group{}, bb.NewInternalError("failed to grant the role", err)
+	}
+
+	return srv.group(ctx, int64(req.GroupID))
+}
+
+// RevokeGroupRoleRPC takes the role away from the group. Revoking a role the
+// group does not have is not an error.
+func (srv AccessService) RevokeGroupRoleRPC(
+	ctx context.Context, req access.GroupRoleRequest,
+) (access.Group, bb.ServiceError) {
+	if req.GroupID <= 0 || req.RoleID <= 0 {
+		return access.Group{}, bb.NewInvalidRequestError("invalid group or role id")
+	}
+
+	err := srv.repo.RemoveGroupRole(ctx, int64(req.GroupID), int64(req.RoleID))
+	if err != nil {
+		return access.Group{}, bb.NewInternalError("failed to revoke the role", err)
+	}
+
+	return srv.group(ctx, int64(req.GroupID))
+}
+
+func (srv AccessService) bootstrapAdmins(ctx context.Context, emails []string) error {
+	if len(emails) == 0 {
+		return nil
+	}
+
+	all := make([]string, 0, len(permissions.All()))
+	for _, permission := range permissions.All() {
+		all = append(all, string(permission))
+	}
+
+	role, err := srv.repo.EnsureRole(ctx, adminRoleName, all)
+	if err != nil {
+		return fmt.Errorf("ensure the admin role: %w", err)
+	}
+
+	group, err := srv.repo.EnsureGroup(ctx, adminGroupName)
+	if err != nil {
+		return fmt.Errorf("ensure the admins group: %w", err)
+	}
+
+	err = srv.repo.AddGroupRole(ctx, group.ID, role.ID)
+	if err != nil {
+		return fmt.Errorf("grant the admin role: %w", err)
+	}
+
+	for _, email := range emails {
+		userID, err := srv.ensureUser(ctx, email)
+		if err != nil {
+			return err
+		}
+
+		err = srv.repo.AddGroupMember(ctx, group.ID, userID)
+		if err != nil {
+			return fmt.Errorf("add %s to the admins: %w", email, err)
+		}
+	}
+
+	return nil
+}
+
+// ensureUser answers the user registered with the email, creating them when there
+// is none. Nobody can tell which of several users sharing it is meant.
+func (srv AccessService) ensureUser(ctx context.Context, email string) (int64, error) {
+	if !validators.Email(email) {
+		return 0, fmt.Errorf("%w: %q", errInvalidAdminEmail, email)
+	}
+
+	found, err := srv.repo.FindUsersByEmail(ctx, email)
+	if err != nil {
+		return 0, fmt.Errorf("find %s: %w", email, err)
+	}
+
+	switch len(found) {
+	case 0:
+		created, err := srv.repo.CreateUser(ctx, email, email)
+		if err != nil {
+			return 0, fmt.Errorf("create %s: %w", email, err)
+		}
+
+		return created.ID, nil
+	case 1:
+		return found[0].ID, nil
+	default:
+		return 0, fmt.Errorf("%w: %s", errSharedAdminEmail, email)
+	}
+}
+
+func adminEmails(raw string) []string {
+	emails := []string{}
+
+	for field := range strings.SplitSeq(raw, ",") {
+		email := strings.TrimSpace(field)
+		if email != "" {
+			emails = append(emails, email)
+		}
+	}
+
+	return emails
+}
+
+// group answers the group with its roles and members.
+func (srv AccessService) group(ctx context.Context, id int64) (access.Group, bb.ServiceError) {
+	row, err := srv.repo.GetGroup(ctx, id)
+	if err != nil {
+		if pg.IsNotFoundError(err) {
+			return access.Group{}, bb.NewNotFoundError("group not found")
+		}
+
+		return access.Group{}, bb.NewInternalError("failed to get the group", err)
+	}
+
+	roleIDs, err := srv.repo.ListGroupRoles(ctx, id)
+	if err != nil {
+		return access.Group{}, bb.NewInternalError("failed to list the roles of the group", err)
+	}
+
+	memberIDs, err := srv.repo.ListGroupMembers(ctx, id)
+	if err != nil {
+		return access.Group{}, bb.NewInternalError("failed to list the members of the group", err)
+	}
+
+	return toGroup(row, roleIDs, memberIDs), nil
+}
+
+// checkGroupAnd makes sure both the group and the other side of the link exist, so
+// that a missing one answers not found rather than a failed constraint.
+func (srv AccessService) checkGroupAnd(
+	ctx context.Context, groupID, otherID int, other string,
+	exists func(context.Context, int64) error,
+) bb.ServiceError {
+	if groupID <= 0 || otherID <= 0 {
+		return bb.NewInvalidRequestError("invalid group or " + other + " id")
+	}
+
+	_, err := srv.repo.GetGroup(ctx, int64(groupID))
+	if err != nil {
+		return notFound(err, "group")
+	}
+
+	err = exists(ctx, int64(otherID))
+	if err != nil {
+		return notFound(err, other)
+	}
+
+	return nil
+}
+
+func (srv AccessService) userExists(ctx context.Context, id int64) error {
+	_, err := srv.repo.GetUser(ctx, id)
+
+	return err
+}
+
+func (srv AccessService) roleExists(ctx context.Context, id int64) error {
+	_, err := srv.repo.GetRole(ctx, id)
+
+	return err
+}
+
+func notFound(err error, what string) bb.ServiceError {
+	if pg.IsNotFoundError(err) {
+		return bb.NewNotFoundError(what + " not found")
+	}
+
+	return bb.NewInternalError("failed to get the "+what, err)
+}
+
+// nameError answers a name another role or group already has as a validation
+// error of its own, and anything else as an internal one.
+func nameError(err error, message string) bb.ServiceError {
+	if pg.IsDuplicateError(err) {
+		return bb.NewValidationError(access.NameTakenCode, "the name is taken")
+	}
+
+	return bb.NewInternalError(message, err)
+}
+
+func checkName(raw string) (string, bb.ServiceError) {
+	name := strings.TrimSpace(raw)
+	if name == "" || len(name) > maxNameLength {
+		return "", bb.NewInvalidRequestError("the name is required and at most 255 characters long")
+	}
+
+	return name, nil
+}
+
+// checkRole validates a role and answers its permissions sorted and without
+// duplicates. A permission the code does not declare could never be checked, so
+// granting one is a mistake rather than a no-op.
+func checkRole(rawName string, granted []string) (string, []string, bb.ServiceError) {
+	name, invalid := checkName(rawName)
+	if invalid != nil {
+		return "", nil, invalid
+	}
+
+	for _, permission := range granted {
+		if !permissions.Known(permission) {
+			return "", nil, bb.NewValidationError(access.UnknownPermissionCode, "unknown permission "+permission)
+		}
+	}
+
+	unique := slices.Clone(granted)
+	slices.Sort(unique)
+
+	return name, nonNil(slices.Compact(unique)), nil
+}
+
+func toRole(row db.Role, granted []string) access.Role {
+	return access.Role{ID: int(row.ID), Name: row.Name, Permissions: nonNil(granted)}
+}
+
+func toGroup(row db.Group, roleIDs, memberIDs []int64) access.Group {
+	return access.Group{ID: int(row.ID), Name: row.Name, RoleIDs: toInts(roleIDs), MemberIDs: toInts(memberIDs)}
+}
+
+func toInts(ids []int64) []int {
+	out := make([]int, len(ids))
+	for i, id := range ids {
+		out[i] = int(id)
+	}
+
+	return out
+}
+
+// nonNil keeps an empty list an empty list on the wire rather than a null.
+func nonNil(values []string) []string {
+	if values == nil {
+		return []string{}
+	}
+
+	return values
+}

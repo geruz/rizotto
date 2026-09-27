@@ -1,6 +1,6 @@
 ---
 name: rizotto
-description: Scaffold and extend projects built with the rizotto framework — creating a project, adding services, adding HTTP controllers, installing whole features such as authentication or file storage, and understanding how its layers fit together. Use whenever the user works in a rizotto project, mentions the rizotto CLI, or asks to add a service, controller, CRUD layer, login/users/OAuth, or file uploads/S3 to one.
+description: Scaffold and extend projects built with the rizotto framework — creating a project, adding services, adding HTTP controllers, installing whole features such as authentication or file storage, and understanding how its layers fit together. Use whenever the user works in a rizotto project, mentions the rizotto CLI, or asks to add a service, controller, CRUD layer, login/users/OAuth, roles/permissions, or file uploads/S3 to one.
 allowed-tools: Bash(rizotto:*)
 ---
 
@@ -49,7 +49,7 @@ rizotto solution skill <name>    # what that one does
 ```
 
 Authentication and file storage are the clearest cases: if the user asks for
-login, users, sessions, OAuth, uploads or S3, do not assemble it out of
+login, users, sessions, roles, permissions, OAuth, uploads or S3, do not assemble it out of
 `service add` and `controller add` — install the solution and report what it
 printed.
 

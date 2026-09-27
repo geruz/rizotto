@@ -194,6 +194,15 @@ so these are the reviewed answer rather than one assembled per project.
     api/user-api/             GET  /api/v1/me
                               POST /api/v1/logout
 
+With `-rbac` it adds groups, roles and permissions: a user is granted what the
+roles of their groups are granted. Permissions are constants in the code, roles
+and groups rows the admins edit.
+
+    permissions/              the permissions of the project
+    services/user/            + the access contract: groups, roles, grants
+    api/auth-area.go          + api.Require(permission...), which answers 403
+    api/access-api/           /api/v1/admin/...  users, roles, groups, members, grants
+
 **`oauth`** — logging in through a provider, built on `user`. It logs existing
 users in and never registers anybody: the user has to be created beforehand.
 
@@ -252,7 +261,7 @@ overwrite are listed and refused unless `-force` says otherwise.
 | `-skip-tidy` | do not run `go mod tidy` in the project                        |
 
 `user` additionally takes `-session` (`cookie` for a browser application, `bearer`
-for a native client), `oauth` takes `-providers` (`google`, `github`) and `files`
+for a native client) and `-rbac` (groups, roles and permissions), `oauth` takes `-providers` (`google`, `github`) and `files`
 takes `-download` (`redirect` to the storage, or the link in the json answer).
 Writing a new solution is described by `rizotto solution skill`.
 
@@ -265,7 +274,7 @@ rizotto skill              # what a rizotto project is made of: layout, bootstra
 rizotto service skill      # services in detail: contract, genbind bindings, bb errors, repository, sqlc, migrations
 rizotto controller skill   # controllers in detail: routing, request objects, contexts, error mapping, route tests
 rizotto solution skill     # what a solution is, how one is installed and how to write another
-rizotto solution skill user  # users and sessions in detail
+rizotto solution skill user  # users, sessions, groups, roles and permissions in detail
 rizotto solution skill oauth # the OAuth login in detail: tables, flow, configuration
 rizotto solution skill files # file storage in detail: the upload flow, the presigner
 ```

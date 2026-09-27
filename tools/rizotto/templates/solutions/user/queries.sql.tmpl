@@ -34,3 +34,147 @@ WHERE s.token_hash = $1;
 DELETE FROM public.sessions
 WHERE token_hash = $1
 RETURNING token_hash;
+{{- if .RBAC}}
+
+-- GetUserPermissions answers everything the groups of a user are granted, which is
+-- what api.Require checks.
+-- name: GetUserPermissions :many
+SELECT DISTINCT rp.permission
+FROM public.group_members gm
+    JOIN public.group_roles gr ON gr.group_id = gm.group_id
+    JOIN public.role_permissions rp ON rp.role_id = gr.role_id
+WHERE gm.user_id = $1
+ORDER BY rp.permission;
+
+-- name: ListUsers :many
+SELECT *
+FROM public.users
+ORDER BY id
+LIMIT sqlc.arg(page_limit)::bigint OFFSET sqlc.arg(page_offset)::bigint;
+
+-- name: ListRoles :many
+SELECT *
+FROM public.roles
+ORDER BY name;
+
+-- name: GetRole :one
+SELECT *
+FROM public.roles
+WHERE id = $1;
+
+-- name: CreateRole :one
+INSERT INTO public.roles (name)
+VALUES ($1)
+RETURNING *;
+
+-- EnsureRole answers the role of that name, creating it when it is missing.
+-- name: EnsureRole :one
+INSERT INTO public.roles (name)
+VALUES ($1)
+ON CONFLICT (name) DO UPDATE SET name = excluded.name
+RETURNING *;
+
+-- name: UpdateRole :one
+UPDATE public.roles
+SET name = $2, updated_at = NOW()
+WHERE id = $1
+RETURNING *;
+
+-- name: DeleteRole :one
+DELETE FROM public.roles
+WHERE id = $1
+RETURNING id;
+
+-- name: ListAllRolePermissions :many
+SELECT *
+FROM public.role_permissions
+ORDER BY role_id, permission;
+
+-- name: ListRolePermissions :many
+SELECT permission
+FROM public.role_permissions
+WHERE role_id = $1
+ORDER BY permission;
+
+-- name: AddRolePermission :exec
+INSERT INTO public.role_permissions (role_id, permission)
+VALUES ($1, $2)
+ON CONFLICT DO NOTHING;
+
+-- name: ClearRolePermissions :exec
+DELETE FROM public.role_permissions
+WHERE role_id = $1;
+
+-- name: ListGroups :many
+SELECT *
+FROM public.groups
+ORDER BY name;
+
+-- name: GetGroup :one
+SELECT *
+FROM public.groups
+WHERE id = $1;
+
+-- name: CreateGroup :one
+INSERT INTO public.groups (name)
+VALUES ($1)
+RETURNING *;
+
+-- EnsureGroup answers the group of that name, creating it when it is missing.
+-- name: EnsureGroup :one
+INSERT INTO public.groups (name)
+VALUES ($1)
+ON CONFLICT (name) DO UPDATE SET name = excluded.name
+RETURNING *;
+
+-- name: UpdateGroup :one
+UPDATE public.groups
+SET name = $2, updated_at = NOW()
+WHERE id = $1
+RETURNING *;
+
+-- name: DeleteGroup :one
+DELETE FROM public.groups
+WHERE id = $1
+RETURNING id;
+
+-- name: ListAllGroupRoles :many
+SELECT *
+FROM public.group_roles
+ORDER BY group_id, role_id;
+
+-- name: ListGroupRoles :many
+SELECT role_id
+FROM public.group_roles
+WHERE group_id = $1
+ORDER BY role_id;
+
+-- name: AddGroupRole :exec
+INSERT INTO public.group_roles (group_id, role_id)
+VALUES ($1, $2)
+ON CONFLICT DO NOTHING;
+
+-- name: RemoveGroupRole :exec
+DELETE FROM public.group_roles
+WHERE group_id = $1 AND role_id = $2;
+
+-- name: ListAllGroupMembers :many
+SELECT *
+FROM public.group_members
+ORDER BY group_id, user_id;
+
+-- name: ListGroupMembers :many
+SELECT user_id
+FROM public.group_members
+WHERE group_id = $1
+ORDER BY user_id;
+
+-- name: AddGroupMember :exec
+INSERT INTO public.group_members (group_id, user_id)
+VALUES ($1, $2)
+ON CONFLICT DO NOTHING;
+
+-- name: RemoveGroupMember :exec
+DELETE FROM public.group_members
+WHERE group_id = $1 AND user_id = $2;
+{{- end}}

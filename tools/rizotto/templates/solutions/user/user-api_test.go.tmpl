@@ -12,7 +12,11 @@ import (
 	"{{.RizottoModule}}/testutils/api"
 
 {{if .Cookie}}	appapi "{{.APIImport}}"
+{{end}}{{if .RBAC}}	"{{.Module}}/api/accesstest"
 {{end}}	"{{.Module}}/api/doc"
+{{- if .RBAC}}
+	"{{.PermissionsImport}}"
+{{- end}}
 	user "{{.ClientImport}}"
 )
 
@@ -31,6 +35,9 @@ func TestMain(m *testing.M) {
 	}
 
 	user.RegisterServer(stubUserService{})
+{{- if .RBAC}}
+	accesstest.Register(map[int][]permissions.Permission{testUserID: {permissions.UsersManage}})
+{{- end}}
 
 	os.Exit(m.Run())
 }
@@ -99,7 +106,16 @@ func testMeCase(t *testing.T, ctr UserController, cfg api.RequestConfiguration) 
 	// act
 	api.TestAPICall(t, ctr, ctr.me, authenticate(cfg)).
 		AddInDocumentation(t, "OK").
+{{- if .RBAC}}
+		ExpectedResponse(t, Me{
+			ID:          testUserID,
+			Email:       testEmail,
+			Name:        testName,
+			Permissions: []string{string(permissions.UsersManage)},
+		})
+{{- else}}
 		ExpectedResponse(t, Me{ID: testUserID, Email: testEmail, Name: testName})
+{{- end}}
 }
 
 // testMeUnauthenticatedCase pins the point of the area function: the handler is

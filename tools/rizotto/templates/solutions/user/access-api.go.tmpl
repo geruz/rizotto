@@ -1,0 +1,412 @@
+// Package accessapi manages the users, the groups and the roles. Every route
+// requires permissions.UsersManage, which the admins of ADMIN_EMAILS are granted.
+package accessapi
+
+import (
+	"net/http"
+
+	"github.com/samber/lo"
+
+	"{{.RizottoModule}}"
+	"{{.RizottoModule}}/bb"
+	"{{.RizottoModule}}/gateway"
+
+	"{{.APIImport}}"
+	"{{.PermissionsImport}}"
+	access "{{.AccessClientImport}}"
+	user "{{.ClientImport}}"
+)
+
+type AccessController struct {
+	gateway.Controller
+
+	listUsersRPC         access.ListUsersRPC
+	createUserRPC        user.CreateUserRPC
+	listRolesRPC         access.ListRolesRPC
+	createRoleRPC        access.CreateRoleRPC
+	updateRoleRPC        access.UpdateRoleRPC
+	deleteRoleRPC        access.DeleteRoleRPC
+	listGroupsRPC        access.ListGroupsRPC
+	getGroupRPC          access.GetGroupRPC
+	createGroupRPC       access.CreateGroupRPC
+	updateGroupRPC       access.UpdateGroupRPC
+	deleteGroupRPC       access.DeleteGroupRPC
+	addGroupMemberRPC    access.AddGroupMemberRPC
+	removeGroupMemberRPC access.RemoveGroupMemberRPC
+	grantGroupRoleRPC    access.GrantGroupRoleRPC
+	revokeGroupRoleRPC   access.RevokeGroupRoleRPC
+}
+
+func NewAccessController() AccessController {
+	accesses := access.BindClient()
+	users := user.BindClient()
+	ctrl := AccessController{
+		Controller:           rizotto.Controller{},
+		listUsersRPC:         accesses.ListUsersRPC,
+		createUserRPC:        users.CreateUserRPC,
+		listRolesRPC:         accesses.ListRolesRPC,
+		createRoleRPC:        accesses.CreateRoleRPC,
+		updateRoleRPC:        accesses.UpdateRoleRPC,
+		deleteRoleRPC:        accesses.DeleteRoleRPC,
+		listGroupsRPC:        accesses.ListGroupsRPC,
+		getGroupRPC:          accesses.GetGroupRPC,
+		createGroupRPC:       accesses.CreateGroupRPC,
+		updateGroupRPC:       accesses.UpdateGroupRPC,
+		deleteGroupRPC:       accesses.DeleteGroupRPC,
+		addGroupMemberRPC:    accesses.AddGroupMemberRPC,
+		removeGroupMemberRPC: accesses.RemoveGroupMemberRPC,
+		grantGroupRoleRPC:    accesses.GrantGroupRoleRPC,
+		revokeGroupRoleRPC:   accesses.RevokeGroupRoleRPC,
+	}
+
+	admin := api.Require(permissions.UsersManage)
+
+	ctrl.AddRoutes(
+		gateway.JSONMethod("GET /api/v1/admin/permissions", admin, ctrl.listPermissions),
+		gateway.JSONMethod("GET /api/v1/admin/users", admin, ctrl.listUsers),
+		gateway.JSONMethod("POST /api/v1/admin/users", admin, ctrl.createUser),
+		gateway.JSONMethod("GET /api/v1/admin/roles", admin, ctrl.listRoles),
+		gateway.JSONMethod("POST /api/v1/admin/roles", admin, ctrl.createRole),
+		gateway.JSONMethod("PUT /api/v1/admin/roles/{role_id}", admin, ctrl.updateRole),
+		gateway.JSONMethod("DELETE /api/v1/admin/roles/{role_id}", admin, ctrl.deleteRole),
+		gateway.JSONMethod("GET /api/v1/admin/groups", admin, ctrl.listGroups),
+		gateway.JSONMethod("GET /api/v1/admin/groups/{group_id}", admin, ctrl.getGroup),
+		gateway.JSONMethod("POST /api/v1/admin/groups", admin, ctrl.createGroup),
+		gateway.JSONMethod("PUT /api/v1/admin/groups/{group_id}", admin, ctrl.updateGroup),
+		gateway.JSONMethod("DELETE /api/v1/admin/groups/{group_id}", admin, ctrl.deleteGroup),
+		gateway.JSONMethod("PUT /api/v1/admin/groups/{group_id}/members/{user_id}", admin, ctrl.addGroupMember),
+		gateway.JSONMethod("DELETE /api/v1/admin/groups/{group_id}/members/{user_id}", admin, ctrl.removeGroupMember),
+		gateway.JSONMethod("PUT /api/v1/admin/groups/{group_id}/roles/{role_id}", admin, ctrl.grantGroupRole),
+		gateway.JSONMethod("DELETE /api/v1/admin/groups/{group_id}/roles/{role_id}", admin, ctrl.revokeGroupRole),
+	)
+
+	return ctrl
+}
+
+// Errors.
+//
+//nolint:gochecknoglobals // the errors of a controller are declared once
+var (
+	roleNotFound = gateway.NewNotFoundError(
+		gateway.ErrorCode("role_not_found"), "Role not found", "No role has the given id",
+	)
+	groupNotFound = gateway.NewNotFoundError(
+		gateway.ErrorCode("group_not_found"), "Group not found", "No group has the given id",
+	)
+	memberNotFound = gateway.NewNotFoundError(
+		gateway.ErrorCode("not_found"), "Not found", "The group or the user does not exist",
+	)
+	grantNotFound = gateway.NewNotFoundError(
+		gateway.ErrorCode("not_found"), "Not found", "The group or the role does not exist",
+	)
+	nameTaken = gateway.HTTPApiError{
+		Code:      http.StatusConflict,
+		Message:   "Name taken",
+		ErrorCode: gateway.ErrorCode(access.NameTakenCode),
+		Details:   "Another one already has this name",
+	}
+	unknownPermission = gateway.HTTPApiError{
+		Code:      http.StatusBadRequest,
+		Message:   "Unknown permission",
+		ErrorCode: gateway.ErrorCode(access.UnknownPermissionCode),
+		Details:   "Only the permissions of GET /api/v1/admin/permissions can be granted",
+	}
+	invalidRequest = gateway.NewInvalidRequest("The request is invalid")
+	internalError  = gateway.NewInternalError()
+)
+
+// The zero answers, returned together with an error.
+//
+//nolint:gochecknoglobals // zero values with a name
+var (
+	noUser      = User{ID: 0, Email: "", Name: ""}
+	noUserList  = UserList{Offset: 0, Limit: 0, Users: nil}
+	noRole      = Role{ID: 0, Name: "", Permissions: nil}
+	noRoleList  = RoleList{Roles: nil}
+	noGroup     = Group{ID: 0, Name: "", RoleIDs: nil, MemberIDs: nil}
+	noGroupList = GroupList{Groups: nil}
+	noDeleted   = Deleted{ID: 0}
+)
+
+type PermissionList struct {
+	Permissions []string `json:"permissions"`
+}
+
+type User struct {
+	ID    int    `json:"id"`
+	Email string `json:"email"`
+	Name  string `json:"name"`
+}
+
+type UserList struct {
+	Offset int    `json:"offset"`
+	Limit  int    `json:"limit"`
+	Users  []User `json:"users"`
+}
+
+type Role struct {
+	ID          int      `json:"id"`
+	Name        string   `json:"name"`
+	Permissions []string `json:"permissions"`
+}
+
+type RoleList struct {
+	Roles []Role `json:"roles"`
+}
+
+type Group struct {
+	ID        int    `json:"id"`
+	Name      string `json:"name"`
+	RoleIDs   []int  `json:"roleIds"`
+	MemberIDs []int  `json:"memberIds"`
+}
+
+type GroupList struct {
+	Groups []Group `json:"groups"`
+}
+
+type Deleted struct {
+	ID int `json:"id"`
+}
+
+type (
+	PermissionListRequest struct{}
+	RoleListRequest       struct{}
+	GroupListRequest      struct{}
+)
+
+type UserListRequest struct {
+	Offset int `in:"query=offset;default=0" json:"-"`
+	Limit  int `in:"query=limit;default=20" json:"-"`
+}
+
+type CreateUserRequest struct {
+	Email string `json:"email" validate:"required,email"`
+	Name  string `json:"name"  validate:"required"`
+}
+
+type CreateRoleRequest struct {
+	Name        string   `json:"name"        validate:"required"`
+	Permissions []string `json:"permissions"`
+}
+
+type UpdateRoleRequest struct {
+	// json:"-" keeps the json body from overwriting what the path carries.
+	RoleID      int      `in:"path=role_id"  json:"-"`
+	Name        string   `json:"name"        validate:"required"`
+	Permissions []string `json:"permissions"`
+}
+
+type RoleRequest struct {
+	RoleID int `in:"path=role_id" json:"-"`
+}
+
+type GroupRequest struct {
+	GroupID int `in:"path=group_id" json:"-"`
+}
+
+type CreateGroupRequest struct {
+	Name string `json:"name" validate:"required"`
+}
+
+type UpdateGroupRequest struct {
+	GroupID int    `in:"path=group_id" json:"-"`
+	Name    string `json:"name"        validate:"required"`
+}
+
+type GroupMemberRequest struct {
+	GroupID int `in:"path=group_id" json:"-"`
+	UserID  int `in:"path=user_id"  json:"-"`
+}
+
+type GroupRoleRequest struct {
+	GroupID int `in:"path=group_id" json:"-"`
+	RoleID  int `in:"path=role_id"  json:"-"`
+}
+
+// listPermissions answers what a role can be granted: the permissions the code of
+// the project declares.
+func (ctrl AccessController) listPermissions(
+	_ api.AuthHTTPContext, _ PermissionListRequest,
+) (PermissionList, gateway.HTTPError) {
+	all := make([]string, 0, len(permissions.All()))
+	for _, permission := range permissions.All() {
+		all = append(all, string(permission))
+	}
+
+	return PermissionList{Permissions: all}, nil
+}
+
+func (ctrl AccessController) listUsers(ctx api.AuthHTTPContext, req UserListRequest) (UserList, gateway.HTTPError) {
+	list, err := ctrl.listUsersRPC(ctx, access.ListUsersRequest{Offset: req.Offset, Limit: req.Limit})
+	if err != nil {
+		return noUserList, answerError(err, nil)
+	}
+
+	return UserList{Offset: list.Offset, Limit: list.Limit, Users: lo.Map(list.Users, toUser)}, nil
+}
+
+// createUser registers a user. It is how people get in: logging in never
+// registers anybody.
+func (ctrl AccessController) createUser(ctx api.AuthHTTPContext, req CreateUserRequest) (User, gateway.HTTPError) {
+	created, err := ctrl.createUserRPC(ctx, user.CreateUserRequest{Email: req.Email, Name: req.Name})
+	if err != nil {
+		return noUser, answerError(err, nil)
+	}
+
+	return toUser(created, 0), nil
+}
+
+func (ctrl AccessController) listRoles(ctx api.AuthHTTPContext, _ RoleListRequest) (RoleList, gateway.HTTPError) {
+	list, err := ctrl.listRolesRPC(ctx, access.ListRolesRequest{})
+	if err != nil {
+		return noRoleList, answerError(err, nil)
+	}
+
+	return RoleList{Roles: lo.Map(list.Roles, toRole)}, nil
+}
+
+func (ctrl AccessController) createRole(ctx api.AuthHTTPContext, req CreateRoleRequest) (Role, gateway.HTTPError) {
+	created, err := ctrl.createRoleRPC(ctx, access.CreateRoleRequest{Name: req.Name, Permissions: req.Permissions})
+	if err != nil {
+		return noRole, answerError(err, nil)
+	}
+
+	return toRole(created, 0), nil
+}
+
+// updateRole renames the role and replaces its permissions with the ones sent.
+func (ctrl AccessController) updateRole(ctx api.AuthHTTPContext, req UpdateRoleRequest) (Role, gateway.HTTPError) {
+	updated, err := ctrl.updateRoleRPC(ctx, access.UpdateRoleRequest{
+		RoleID:      req.RoleID,
+		Name:        req.Name,
+		Permissions: req.Permissions,
+	})
+	if err != nil {
+		return noRole, answerError(err, roleNotFound)
+	}
+
+	return toRole(updated, 0), nil
+}
+
+func (ctrl AccessController) deleteRole(ctx api.AuthHTTPContext, req RoleRequest) (Deleted, gateway.HTTPError) {
+	deleted, err := ctrl.deleteRoleRPC(ctx, access.RoleRequest{RoleID: req.RoleID})
+	if err != nil {
+		return noDeleted, answerError(err, roleNotFound)
+	}
+
+	return Deleted{ID: deleted.RoleID}, nil
+}
+
+func (ctrl AccessController) listGroups(ctx api.AuthHTTPContext, _ GroupListRequest) (GroupList, gateway.HTTPError) {
+	list, err := ctrl.listGroupsRPC(ctx, access.ListGroupsRequest{})
+	if err != nil {
+		return noGroupList, answerError(err, nil)
+	}
+
+	return GroupList{Groups: lo.Map(list.Groups, toGroup)}, nil
+}
+
+func (ctrl AccessController) getGroup(ctx api.AuthHTTPContext, req GroupRequest) (Group, gateway.HTTPError) {
+	found, err := ctrl.getGroupRPC(ctx, access.GroupRequest{GroupID: req.GroupID})
+	if err != nil {
+		return noGroup, answerError(err, groupNotFound)
+	}
+
+	return toGroup(found, 0), nil
+}
+
+func (ctrl AccessController) createGroup(ctx api.AuthHTTPContext, req CreateGroupRequest) (Group, gateway.HTTPError) {
+	created, err := ctrl.createGroupRPC(ctx, access.CreateGroupRequest{Name: req.Name})
+	if err != nil {
+		return noGroup, answerError(err, nil)
+	}
+
+	return toGroup(created, 0), nil
+}
+
+func (ctrl AccessController) updateGroup(ctx api.AuthHTTPContext, req UpdateGroupRequest) (Group, gateway.HTTPError) {
+	updated, err := ctrl.updateGroupRPC(ctx, access.UpdateGroupRequest{GroupID: req.GroupID, Name: req.Name})
+	if err != nil {
+		return noGroup, answerError(err, groupNotFound)
+	}
+
+	return toGroup(updated, 0), nil
+}
+
+func (ctrl AccessController) deleteGroup(ctx api.AuthHTTPContext, req GroupRequest) (Deleted, gateway.HTTPError) {
+	deleted, err := ctrl.deleteGroupRPC(ctx, access.GroupRequest{GroupID: req.GroupID})
+	if err != nil {
+		return noDeleted, answerError(err, groupNotFound)
+	}
+
+	return Deleted{ID: deleted.GroupID}, nil
+}
+
+func (ctrl AccessController) addGroupMember(
+	ctx api.AuthHTTPContext, req GroupMemberRequest,
+) (Group, gateway.HTTPError) {
+	updated, err := ctrl.addGroupMemberRPC(ctx, access.GroupMemberRequest{GroupID: req.GroupID, UserID: req.UserID})
+	if err != nil {
+		return noGroup, answerError(err, memberNotFound)
+	}
+
+	return toGroup(updated, 0), nil
+}
+
+func (ctrl AccessController) removeGroupMember(
+	ctx api.AuthHTTPContext, req GroupMemberRequest,
+) (Group, gateway.HTTPError) {
+	updated, err := ctrl.removeGroupMemberRPC(ctx, access.GroupMemberRequest{GroupID: req.GroupID, UserID: req.UserID})
+	if err != nil {
+		return noGroup, answerError(err, groupNotFound)
+	}
+
+	return toGroup(updated, 0), nil
+}
+
+func (ctrl AccessController) grantGroupRole(ctx api.AuthHTTPContext, req GroupRoleRequest) (Group, gateway.HTTPError) {
+	updated, err := ctrl.grantGroupRoleRPC(ctx, access.GroupRoleRequest{GroupID: req.GroupID, RoleID: req.RoleID})
+	if err != nil {
+		return noGroup, answerError(err, grantNotFound)
+	}
+
+	return toGroup(updated, 0), nil
+}
+
+func (ctrl AccessController) revokeGroupRole(ctx api.AuthHTTPContext, req GroupRoleRequest) (Group, gateway.HTTPError) {
+	updated, err := ctrl.revokeGroupRoleRPC(ctx, access.GroupRoleRequest{GroupID: req.GroupID, RoleID: req.RoleID})
+	if err != nil {
+		return noGroup, answerError(err, groupNotFound)
+	}
+
+	return toGroup(updated, 0), nil
+}
+
+// answerError turns an error of the services into the answer of a route. The
+// services answer a validation error for what the caller got wrong, which is
+// told apart by its code rather than taken for an internal error.
+func answerError(err bb.ServiceError, notFound gateway.HTTPError) gateway.HTTPError {
+	switch {
+	case bb.IsValidationErrorWithCode(err, access.NameTakenCode):
+		return nameTaken
+	case bb.IsValidationErrorWithCode(err, access.UnknownPermissionCode):
+		return unknownPermission
+	case bb.IsValidationErrorWithCode(err, gateway.InvalidRequestErrorCode):
+		return invalidRequest
+	default:
+		return gateway.MapError(err).IfNotFound(notFound).Others(internalError)
+	}
+}
+
+func toUser(src user.User, _ int) User {
+	return User{ID: src.ID, Email: src.Email, Name: src.Name}
+}
+
+func toRole(src access.Role, _ int) Role {
+	return Role{ID: src.ID, Name: src.Name, Permissions: src.Permissions}
+}
+
+func toGroup(src access.Group, _ int) Group {
+	return Group{ID: src.ID, Name: src.Name, RoleIDs: src.RoleIDs, MemberIDs: src.MemberIDs}
+}

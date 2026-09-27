@@ -7,8 +7,8 @@ belongs to which user, the calls to the providers, and the two routes performing
 the login.
 
 It **only logs users in, it never registers them**. The user has to exist before
-their first login, created by the project with `user.CreateUserRPC` (an admin
-route, an invitation, a seed). The first login of an external account finds that
+their first login, created by the project with `user.CreateUserRPC` — with
+`user -rbac`, that is `POST /api/v1/admin/users`. The first login of an external account finds that
 user by the email the provider vouches for and links the account to it; every later
 login goes by the link alone.
 

@@ -4,6 +4,8 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -19,6 +21,7 @@ top; a project with its own way of authenticating people uses this one alone.
 
 Flags:
 	-session     where the session token travels: "cookie" or "bearer" (default "cookie")
+	-rbac        add groups, roles and permissions, with the routes managing them (default false)
 
 The project must have sqlc.yaml (make-project writes it), since the solution owns tables.
 `
@@ -41,6 +44,11 @@ type userSpec struct {
 	// Methods drive the client interface and the generated bindings, so that
 	// genbind reproduces bind-gen.go from the contract.
 	Methods []serviceMethod
+	// RBAC adds groups, roles and permissions: the access contract, its routes and
+	// api.Require.
+	RBAC bool
+	// AccessMethods are the RPCs of the access contract, when RBAC is on.
+	AccessMethods []serviceMethod
 }
 
 func (u userSpec) Dir() string {
@@ -53,6 +61,53 @@ func (u userSpec) ClientImport() string {
 
 func (u userSpec) APIImport() string {
 	return u.Module + "/api"
+}
+
+// AccessClientImport is the contract of the groups, roles and permissions. It is a
+// contract of its own rather than more RPCs of UserClient, so that the solutions
+// stubbing UserClient in their tests stay the same with and without RBAC.
+func (u userSpec) AccessClientImport() string {
+	return u.Module + "/" + u.Dir() + "/access-client"
+}
+
+// PermissionsImport is the list of permissions, which belongs to the project: the
+// code checking a permission is what gives it a meaning.
+func (u userSpec) PermissionsImport() string {
+	return u.Module + "/permissions"
+}
+
+// accessMethods are the RPCs of the access contract.
+func accessMethods() []serviceMethod {
+	address := func(entity, action string) string {
+		return "http://user-service/access/" + entity + "/" + action
+	}
+
+	method := func(name, request, response, addr string) serviceMethod {
+		return serviceMethod{Name: name, Request: request, Response: response, Address: addr}
+	}
+
+	const (
+		role  = "role"
+		group = "group"
+	)
+
+	return []serviceMethod{
+		method("GetUserPermissionsRPC", "GetUserPermissionsRequest", "UserPermissions", address("user", "permissions")),
+		method("ListUsersRPC", "ListUsersRequest", "UserList", address("user", "list")),
+		method("ListRolesRPC", "ListRolesRequest", "RoleList", address(role, "list")),
+		method("CreateRoleRPC", "CreateRoleRequest", "Role", address(role, "create")),
+		method("UpdateRoleRPC", "UpdateRoleRequest", "Role", address(role, "update")),
+		method("DeleteRoleRPC", "RoleRequest", "DeletedRole", address(role, "delete")),
+		method("ListGroupsRPC", "ListGroupsRequest", "GroupList", address(group, "list")),
+		method("GetGroupRPC", "GroupRequest", "Group", address(group, "get")),
+		method("CreateGroupRPC", "CreateGroupRequest", "Group", address(group, "create")),
+		method("UpdateGroupRPC", "UpdateGroupRequest", "Group", address(group, "update")),
+		method("DeleteGroupRPC", "GroupRequest", "DeletedGroup", address(group, "delete")),
+		method("AddGroupMemberRPC", "GroupMemberRequest", "Group", address(group, "add-member")),
+		method("RemoveGroupMemberRPC", "GroupMemberRequest", "Group", address(group, "remove-member")),
+		method("GrantGroupRoleRPC", "GroupRoleRequest", "Group", address(group, "grant-role")),
+		method("RevokeGroupRoleRPC", "GroupRoleRequest", "Group", address(group, "revoke-role")),
+	}
 }
 
 // userMethods are the RPCs of the user service. They are not CRUD shaped, which
@@ -117,6 +172,38 @@ func (userSolution) Marker() string {
 
 type userFlags struct {
 	session string
+	rbac    optionalBool
+}
+
+// optionalBool is a boolean flag that knows whether it was typed at all, so that
+// a missing one is asked rather than taken as false.
+type optionalBool struct {
+	set   bool
+	value bool
+}
+
+func (o *optionalBool) String() string {
+	if o == nil || !o.set {
+		return ""
+	}
+
+	return strconv.FormatBool(o.value)
+}
+
+func (o *optionalBool) Set(raw string) error {
+	value, ok := parseYesNo(raw)
+	if !ok {
+		return fmt.Errorf("%w: expected true or false, got %q", errUsage, raw)
+	}
+
+	o.set, o.value = true, value
+
+	return nil
+}
+
+// IsBoolFlag lets "-rbac" stand for "-rbac=true".
+func (o *optionalBool) IsBoolFlag() bool {
+	return true
 }
 
 func (userSolution) BindFlags(fs *flag.FlagSet) any {
@@ -124,6 +211,7 @@ func (userSolution) BindFlags(fs *flag.FlagSet) any {
 
 	fs.StringVar(&f.session, "session", "",
 		`where the session token travels: "cookie" or "bearer" (default "cookie")`)
+	fs.Var(&f.rbac, "rbac", "add groups, roles and permissions, with the routes managing them (default false)")
 
 	return f
 }
@@ -143,12 +231,25 @@ func (u userSolution) Ask(flags any, pr *prompter, prj projectInfo) (solutionPla
 		return solutionPlan{}, err
 	}
 
+	rbac := f.rbac.value
+	if !f.rbac.set {
+		rbac, err = pr.askYesNo("Groups, roles and permissions", false)
+		if err != nil {
+			return solutionPlan{}, err
+		}
+	}
+
 	spec := userSpec{
 		Module:            prj.Module,
 		RizottoModule:     rizottoModule,
 		Cookie:            cookie,
 		SessionCookieName: "session",
 		Methods:           userMethods(),
+		RBAC:              rbac,
+		AccessMethods:     nil,
+	}
+	if rbac {
+		spec.AccessMethods = accessMethods()
 	}
 
 	return solutionPlan{
@@ -183,6 +284,14 @@ func normalizeSession(raw string) (string, error) {
 }
 
 func (u userSpec) files() []fileSpec {
+	if !u.RBAC {
+		return u.baseFiles()
+	}
+
+	return slices.Concat(u.baseFiles(), u.rbacFiles())
+}
+
+func (u userSpec) baseFiles() []fileSpec {
 	dir := u.Dir()
 
 	return []fileSpec{
@@ -202,8 +311,25 @@ func (u userSpec) files() []fileSpec {
 	}
 }
 
+// rbacFiles are the groups, roles and permissions -rbac adds.
+func (u userSpec) rbacFiles() []fileSpec {
+	dir := u.Dir()
+
+	return []fileSpec{
+		{tmpl: "solutions/user/permissions.go.tmpl", out: "permissions/permissions.go"},
+		{tmpl: "solutions/user/access-client.go.tmpl", out: dir + "/access-client/client.go"},
+		{tmpl: "solutions/user/access-bind-gen.go.tmpl", out: dir + "/access-client/bind-gen.go"},
+		{tmpl: "solutions/user/access-service.go.tmpl", out: dir + "/access-service.go"},
+		{tmpl: "solutions/user/access-repository.go.tmpl", out: dir + "/repository/access-repository.go"},
+		{tmpl: "solutions/user/access-migration.sql.tmpl", out: dir + "/repository/migrations/000002_create_access.sql"},
+		{tmpl: "solutions/user/accesstest.go.tmpl", out: "api/accesstest/accesstest.go"},
+		{tmpl: "solutions/user/access-api.go.tmpl", out: "api/access-api/access.go"},
+		{tmpl: "solutions/user/access-api_test.go.tmpl", out: "api/access-api/access_test.go"},
+	}
+}
+
 func (u userSpec) env() []envVar {
-	return []envVar{
+	sessions := []envVar{
 		{
 			Key:     "APP_LOGIN_REDIRECT_URL",
 			Value:   "http://localhost:3000",
@@ -215,9 +341,23 @@ func (u userSpec) env() []envVar {
 			Comment: "how long a session stays valid",
 		},
 	}
+
+	if !u.RBAC {
+		return sessions
+	}
+
+	return slices.Concat(sessions, []envVar{{
+		Key:     "ADMIN_EMAILS",
+		Value:   "",
+		Comment: "comma separated emails put into the admins group at every start",
+	}})
 }
 
 func (u userSpec) steps() []string {
+	if u.RBAC {
+		return u.rbacSteps()
+	}
+
 	register := fmt.Sprintf(`register the service in server.go, before the controllers:
 
          import (
@@ -238,18 +378,68 @@ func (u userSpec) steps() []string {
              ),
          )`
 
-	area := `authenticate the private routes: api.AuthArea is the real area function,
+	return []string{
+		stepEnvExample,
+		register,
+		routes,
+		stepAuthArea,
+		stepGen,
+		"task migrate-up # applies the tables of the solution",
+		"task test       # runs the route tests and writes api/user-api/openapi.yml",
+	}
+}
+
+const stepAuthArea = `authenticate the private routes: api.AuthArea is the real area function,
      so replace api.PrivateArea with api.AuthArea and api.UserHTTPContext with
      api.AuthHTTPContext in the controllers that need the current user.
      api/controller.go keeps its placeholder for the rest.`
+
+// rbacSteps are the steps of an installation with groups, roles and permissions,
+// which has a second contract to register and a second route table to join.
+func (u userSpec) rbacSteps() []string {
+	register := fmt.Sprintf(`register the services in server.go, before the controllers. The
+     admins of ADMIN_EMAILS are put in place before anything is served:
+
+         import (
+             "%s"
+             "%s"
+             usersrv "%s/%s"
+         )
+
+         user.RegisterServer(usersrv.NewUserService(pgPool))
+
+         accessSrv := usersrv.NewAccessService(pgPool)
+         accessSrv.MustBootstrapAdmins(ctx)
+         access.RegisterServer(accessSrv)`,
+		u.ClientImport(), u.AccessClientImport(), u.Module, u.Dir())
+
+	routes := `join the route tables in server.go:
+
+         import (
+             "` + u.Module + `/api/access-api"
+             "` + u.Module + `/api/user-api"
+         )
+
+         gt.Routing(
+             gateway.JoinRouteTables(
+                 userapi.NewUserController().RouteTable(),
+                 accessapi.NewAccessController().RouteTable(),
+             ),
+         )`
+
+	require := `guard the routes needing a permission with api.Require instead of
+     api.AuthArea; declare the permissions of the project in permissions/permissions.go:
+
+         gateway.JSONMethod("POST /api/v1/orders", api.Require(permissions.OrdersWrite), ctrl.create)`
 
 	return []string{
 		stepEnvExample,
 		register,
 		routes,
-		area,
+		stepAuthArea,
+		require,
 		stepGen,
 		"task migrate-up # applies the tables of the solution",
-		"task test       # runs the route tests and writes api/user-api/openapi.yml",
+		"task test       # runs the route tests and writes the openapi.yml of user-api and access-api",
 	}
 }

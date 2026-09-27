@@ -1,0 +1,42 @@
+// Package accesstest stands in for the access service in route tests, so that a
+// route behind api.Require is tested without a database.
+package accesstest
+
+import (
+	"context"
+
+	"{{.RizottoModule}}/bb"
+
+	"{{.PermissionsImport}}"
+	access "{{.AccessClientImport}}"
+)
+
+// Register answers the permissions of grants for each user; a user missing from
+// it is granted nothing. Like every registration of a contract it is done once
+// per test binary, from TestMain. Every other RPC of the contract fails: the
+// tests of the routes calling them replace their clients with mock.RPC.
+func Register(grants map[int][]permissions.Permission) {
+	access.RegisterServer(stub{grants: grants})
+}
+
+type stub struct {
+	grants map[int][]permissions.Permission
+}
+
+func (s stub) GetUserPermissionsRPC(
+	_ context.Context, req access.GetUserPermissionsRequest,
+) (access.UserPermissions, bb.ServiceError) {
+	granted := make([]string, 0, len(s.grants[req.UserID]))
+	for _, permission := range s.grants[req.UserID] {
+		granted = append(granted, string(permission))
+	}
+
+	return access.UserPermissions{UserID: req.UserID, Permissions: granted}, nil
+}
+{{range .AccessMethods}}{{if ne .Name "GetUserPermissionsRPC"}}
+func (stub) {{.Name}}(_ context.Context, _ access.{{.Request}}) (access.{{.Response}}, bb.ServiceError) {
+	var zero access.{{.Response}}
+
+	return zero, bb.NewNotImplementedError("accesstest", "{{.Name}}")
+}
+{{end}}{{end}}

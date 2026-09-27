@@ -1,0 +1,591 @@
+package accessapi
+
+import (
+	"context"
+	"os"
+	"testing"
+	"time"
+
+	"{{.RizottoModule}}/bb"
+	"{{.RizottoModule}}/documentation/openapi"
+	"{{.RizottoModule}}/gateway"
+	"{{.RizottoModule}}/testutils/api"
+	"{{.RizottoModule}}/testutils/mock"
+
+	appapi "{{.APIImport}}"
+	"{{.Module}}/api/accesstest"
+	"{{.Module}}/api/doc"
+	"{{.PermissionsImport}}"
+	access "{{.AccessClientImport}}"
+	user "{{.ClientImport}}"
+)
+
+const (
+	// adminSession belongs to adminID, who is granted permissions.UsersManage;
+	// memberSession to memberID, who is granted nothing.
+	adminSession  = "an-admin-session"
+	memberSession = "a-member-session"
+	adminID       = 1
+	memberID      = 2
+	testEmail     = "person@example.com"
+	testName      = "A Person"
+	testRole      = "editor"
+	testGroup     = "Accounting"
+)
+
+// TestMain registers a stub user service knowing two sessions and grants the
+// admin permissions.UsersManage, so the tests go through the real area function.
+func TestMain(m *testing.M) {
+	err := os.Setenv("APP_LOGIN_REDIRECT_URL", "http://localhost:3000")
+	if err != nil {
+		panic(err)
+	}
+
+	user.RegisterServer(stubUserService{})
+	accesstest.Register(map[int][]permissions.Permission{adminID: {permissions.UsersManage}})
+
+	os.Exit(m.Run())
+}
+
+type stubUserService struct{}
+
+func (stubUserService) GetUserRPC(_ context.Context, req user.GetUserRequest) (user.User, bb.ServiceError) {
+	return user.User{ID: req.UserID, Email: testEmail, Name: testName}, nil
+}
+
+func (stubUserService) GetUserByEmailRPC(
+	_ context.Context, req user.GetUserByEmailRequest,
+) (user.User, bb.ServiceError) {
+	return user.User{ID: adminID, Email: req.Email, Name: testName}, nil
+}
+
+func (stubUserService) CreateUserRPC(_ context.Context, req user.CreateUserRequest) (user.User, bb.ServiceError) {
+	return user.User{ID: adminID, Email: req.Email, Name: req.Name}, nil
+}
+
+func (stubUserService) CreateSessionRPC(
+	_ context.Context, req user.CreateSessionRequest,
+) (user.Session, bb.ServiceError) {
+	return user.Session{
+		Token:     adminSession,
+		ExpiresAt: time.Now().UTC().Add(time.Hour),
+		User:      user.User{ID: req.UserID, Email: testEmail, Name: testName},
+	}, nil
+}
+
+func (stubUserService) GetSessionRPC(
+	_ context.Context, req user.GetSessionRequest,
+) (user.Session, bb.ServiceError) {
+	sessions := map[string]int{adminSession: adminID, memberSession: memberID}
+
+	userID, found := sessions[req.Token]
+	if !found {
+		return user.Session{}, bb.NewUnauthorizedError("unknown session")
+	}
+
+	return user.Session{
+		Token:     "",
+		ExpiresAt: time.Now().UTC().Add(time.Hour),
+		User:      user.User{ID: userID, Email: testEmail, Name: testName},
+	}, nil
+}
+
+func (stubUserService) DeleteSessionRPC(
+	_ context.Context, _ user.DeleteSessionRequest,
+) (user.DeletedSession, bb.ServiceError) {
+	return user.DeletedSession{Deleted: true}, nil
+}
+
+// asAdmin makes the request carry the session of the admin, asMember the one of a
+// user granted nothing.
+func asAdmin(cfg api.RequestConfiguration) api.RequestConfiguration {
+	return cfg.WithRequest(appapi.SessionRequest(adminSession))
+}
+
+func asMember(cfg api.RequestConfiguration) api.RequestConfiguration {
+	return cfg.WithRequest(appapi.SessionRequest(memberSession))
+}
+
+func testGroupAnswer() access.Group {
+	return access.Group{ID: 1, Name: testGroup, RoleIDs: []int{1}, MemberIDs: []int{adminID}}
+}
+
+func expectedGroup() Group {
+	return Group{ID: 1, Name: testGroup, RoleIDs: []int{1}, MemberIDs: []int{adminID}}
+}
+
+func Test_ListPermissionsRoute(t *testing.T) {
+	t.Parallel()
+
+	api.GroupRouteTests(t, "GET /api/v1/admin/permissions", NewAccessController).
+		Documentation(
+			doc.ApiPublicDocumentationV1,
+			openapi.Description("Lists the permissions a role can be granted."),
+		).
+		Case("listed", testListPermissionsCase).
+		Case("without a session", testWithoutSessionCase).
+		Case("without the permission", testWithoutPermissionCase)
+}
+
+func testListPermissionsCase(t *testing.T, ctr AccessController, cfg api.RequestConfiguration) {
+	t.Helper()
+
+	// act
+	api.TestAPICall(t, ctr, ctr.listPermissions, asAdmin(cfg)).
+		AddInDocumentation(t, "OK").
+		ExpectedResponse(t, PermissionList{Permissions: []string{string(permissions.UsersManage)}})
+}
+
+// testWithoutSessionCase and testWithoutPermissionCase pin the area function of
+// every route of the controller: they all share it.
+func testWithoutSessionCase(t *testing.T, ctr AccessController, cfg api.RequestConfiguration) {
+	t.Helper()
+
+	// act
+	api.TestAPICall(t, ctr, ctr.listPermissions, cfg).
+		ExpectedError(t, gateway.NewUnauthorizedError("Authentication required"))
+}
+
+func testWithoutPermissionCase(t *testing.T, ctr AccessController, cfg api.RequestConfiguration) {
+	t.Helper()
+
+	// act
+	api.TestAPICall(t, ctr, ctr.listPermissions, asMember(cfg)).
+		AddInDocumentation(t, "A caller without the permission").
+		ExpectedError(t, gateway.NewForbiddenError(
+			gateway.ForbiddenErrorCode, "Forbidden", "The caller is not granted what this route requires",
+		))
+}
+
+func Test_ListUsersRoute(t *testing.T) {
+	t.Parallel()
+
+	api.GroupRouteTests(t, "GET /api/v1/admin/users", NewAccessController).
+		Documentation(doc.ApiPublicDocumentationV1, openapi.Description("Returns a page of users.")).
+		Case("listed", testListUsersCase)
+}
+
+func testListUsersCase(t *testing.T, ctr AccessController, cfg api.RequestConfiguration) {
+	t.Helper()
+	// arrange
+	mock.RPC(&ctr.listUsersRPC).Success(access.UserList{
+		Offset: 0,
+		Limit:  20,
+		Users:  []user.User{{"{{"}}ID: adminID, Email: testEmail, Name: testName}},
+	})
+
+	// act
+	api.TestAPICall(t, ctr, ctr.listUsers, asAdmin(cfg).WithQuery("")).
+		AddInDocumentation(t, "OK").
+		ExpectedRequest(t, UserListRequest{Offset: 0, Limit: 20}).
+		ExpectedResponse(t, UserList{
+			Offset: 0,
+			Limit:  20,
+			Users:  []User{{"{{"}}ID: adminID, Email: testEmail, Name: testName}},
+		})
+}
+
+func Test_CreateUserRoute(t *testing.T) {
+	t.Parallel()
+
+	api.GroupRouteTests(t, "POST /api/v1/admin/users", NewAccessController).
+		Documentation(
+			doc.ApiPublicDocumentationV1,
+			openapi.Description("Registers a user, who can then log in."),
+		).
+		Case("created", testCreateUserCase)
+}
+
+func testCreateUserCase(t *testing.T, ctr AccessController, cfg api.RequestConfiguration) {
+	t.Helper()
+	// arrange
+	mock.RPC(&ctr.createUserRPC).Success(user.User{ID: adminID, Email: testEmail, Name: testName})
+	body := CreateUserRequest{Email: testEmail, Name: testName}
+
+	// act
+	api.TestAPICall(t, ctr, ctr.createUser, asAdmin(cfg).WithJSONBody(body)).
+		AddInDocumentation(t, "OK").
+		ExpectedRequest(t, body).
+		ExpectedResponse(t, User{ID: adminID, Email: testEmail, Name: testName})
+}
+
+func Test_ListRolesRoute(t *testing.T) {
+	t.Parallel()
+
+	api.GroupRouteTests(t, "GET /api/v1/admin/roles", NewAccessController).
+		Documentation(doc.ApiPublicDocumentationV1, openapi.Description("Lists the roles.")).
+		Case("listed", testListRolesCase)
+}
+
+func testListRolesCase(t *testing.T, ctr AccessController, cfg api.RequestConfiguration) {
+	t.Helper()
+	// arrange
+	mock.RPC(&ctr.listRolesRPC).Success(access.RoleList{
+		Roles: []access.Role{{"{{"}}ID: 1, Name: testRole, Permissions: []string{string(permissions.UsersManage)}}},
+	})
+
+	// act
+	api.TestAPICall(t, ctr, ctr.listRoles, asAdmin(cfg)).
+		AddInDocumentation(t, "OK").
+		ExpectedResponse(t, RoleList{
+			Roles: []Role{{"{{"}}ID: 1, Name: testRole, Permissions: []string{string(permissions.UsersManage)}}},
+		})
+}
+
+func Test_CreateRoleRoute(t *testing.T) {
+	t.Parallel()
+
+	api.GroupRouteTests(t, "POST /api/v1/admin/roles", NewAccessController).
+		Documentation(doc.ApiPublicDocumentationV1, openapi.Description("Creates a role.")).
+		Case("created", testCreateRoleCase).
+		Case("name taken", testCreateRoleNameTakenCase).
+		Case("unknown permission", testCreateRoleUnknownPermissionCase)
+}
+
+func testCreateRoleCase(t *testing.T, ctr AccessController, cfg api.RequestConfiguration) {
+	t.Helper()
+	// arrange
+	mock.RPC(&ctr.createRoleRPC).Success(access.Role{
+		ID: 1, Name: testRole, Permissions: []string{string(permissions.UsersManage)},
+	})
+	body := CreateRoleRequest{Name: testRole, Permissions: []string{string(permissions.UsersManage)}}
+
+	// act
+	api.TestAPICall(t, ctr, ctr.createRole, asAdmin(cfg).WithJSONBody(body)).
+		AddInDocumentation(t, "OK").
+		ExpectedRequest(t, body).
+		ExpectedResponse(t, Role{ID: 1, Name: testRole, Permissions: []string{string(permissions.UsersManage)}})
+}
+
+func testCreateRoleNameTakenCase(t *testing.T, ctr AccessController, cfg api.RequestConfiguration) {
+	t.Helper()
+	// arrange
+	mock.RPC(&ctr.createRoleRPC).Error(bb.NewValidationError(access.NameTakenCode, "the name is taken"))
+
+	// act
+	api.TestAPICall(t, ctr, ctr.createRole,
+		asAdmin(cfg).WithJSONBody(CreateRoleRequest{Name: testRole, Permissions: nil}),
+	).
+		AddInDocumentation(t, "A name another role has").
+		ExpectedError(t, nameTaken)
+}
+
+func testCreateRoleUnknownPermissionCase(t *testing.T, ctr AccessController, cfg api.RequestConfiguration) {
+	t.Helper()
+	// arrange
+	mock.RPC(&ctr.createRoleRPC).Error(bb.NewValidationError(access.UnknownPermissionCode, "unknown permission"))
+
+	// act
+	api.TestAPICall(t, ctr, ctr.createRole,
+		asAdmin(cfg).WithJSONBody(CreateRoleRequest{Name: testRole, Permissions: []string{"nothing.real"}}),
+	).
+		AddInDocumentation(t, "A permission the project does not declare").
+		ExpectedError(t, unknownPermission)
+}
+
+func Test_UpdateRoleRoute(t *testing.T) {
+	t.Parallel()
+
+	api.GroupRouteTests(t, "PUT /api/v1/admin/roles/{role_id}", NewAccessController).
+		Documentation(
+			doc.ApiPublicDocumentationV1,
+			openapi.Description("Renames a role and replaces its permissions."),
+		).
+		Case("updated", testUpdateRoleCase).
+		Case("not found", testUpdateRoleNotFoundCase)
+}
+
+func testUpdateRoleCase(t *testing.T, ctr AccessController, cfg api.RequestConfiguration) {
+	t.Helper()
+	// arrange
+	mock.RPC(&ctr.updateRoleRPC).Success(access.Role{ID: 1, Name: testRole, Permissions: []string{}})
+
+	// act
+	api.TestAPICall(t, ctr, ctr.updateRole,
+		asAdmin(cfg).WithPathVar("role_id", "1").WithJSONBody(UpdateRoleRequest{
+			RoleID: 0, Name: testRole, Permissions: []string{},
+		}),
+	).
+		AddInDocumentation(t, "OK").
+		ExpectedRequest(t, UpdateRoleRequest{RoleID: 1, Name: testRole, Permissions: []string{}}).
+		ExpectedResponse(t, Role{ID: 1, Name: testRole, Permissions: []string{}})
+}
+
+func testUpdateRoleNotFoundCase(t *testing.T, ctr AccessController, cfg api.RequestConfiguration) {
+	t.Helper()
+	// arrange
+	mock.RPC(&ctr.updateRoleRPC).Error(bb.NewNotFoundError("role not found"))
+
+	// act
+	api.TestAPICall(t, ctr, ctr.updateRole,
+		asAdmin(cfg).WithPathVar("role_id", "2").WithJSONBody(UpdateRoleRequest{
+			RoleID: 0, Name: testRole, Permissions: nil,
+		}),
+	).
+		AddInDocumentation(t, "A role not found").
+		ExpectedError(t, roleNotFound)
+}
+
+func Test_DeleteRoleRoute(t *testing.T) {
+	t.Parallel()
+
+	api.GroupRouteTests(t, "DELETE /api/v1/admin/roles/{role_id}", NewAccessController).
+		Documentation(
+			doc.ApiPublicDocumentationV1,
+			openapi.Description("Deletes a role, taking it away from every group."),
+		).
+		Case("deleted", testDeleteRoleCase)
+}
+
+func testDeleteRoleCase(t *testing.T, ctr AccessController, cfg api.RequestConfiguration) {
+	t.Helper()
+	// arrange
+	mock.RPC(&ctr.deleteRoleRPC).Success(access.DeletedRole{RoleID: 1})
+
+	// act
+	api.TestAPICall(t, ctr, ctr.deleteRole, asAdmin(cfg).WithPathVar("role_id", "1")).
+		AddInDocumentation(t, "OK").
+		ExpectedRequest(t, RoleRequest{RoleID: 1}).
+		ExpectedResponse(t, Deleted{ID: 1})
+}
+
+func Test_ListGroupsRoute(t *testing.T) {
+	t.Parallel()
+
+	api.GroupRouteTests(t, "GET /api/v1/admin/groups", NewAccessController).
+		Documentation(
+			doc.ApiPublicDocumentationV1,
+			openapi.Description("Lists the groups with their roles and members."),
+		).
+		Case("listed", testListGroupsCase)
+}
+
+func testListGroupsCase(t *testing.T, ctr AccessController, cfg api.RequestConfiguration) {
+	t.Helper()
+	// arrange
+	mock.RPC(&ctr.listGroupsRPC).Success(access.GroupList{Groups: []access.Group{testGroupAnswer()}})
+
+	// act
+	api.TestAPICall(t, ctr, ctr.listGroups, asAdmin(cfg)).
+		AddInDocumentation(t, "OK").
+		ExpectedResponse(t, GroupList{Groups: []Group{expectedGroup()}})
+}
+
+func Test_GetGroupRoute(t *testing.T) {
+	t.Parallel()
+
+	api.GroupRouteTests(t, "GET /api/v1/admin/groups/{group_id}", NewAccessController).
+		Documentation(doc.ApiPublicDocumentationV1, openapi.Description("Returns a group.")).
+		Case("found", testGetGroupCase).
+		Case("not found", testGetGroupNotFoundCase)
+}
+
+func testGetGroupCase(t *testing.T, ctr AccessController, cfg api.RequestConfiguration) {
+	t.Helper()
+	// arrange
+	mock.RPC(&ctr.getGroupRPC).Success(testGroupAnswer())
+
+	// act
+	api.TestAPICall(t, ctr, ctr.getGroup, asAdmin(cfg).WithPathVar("group_id", "1")).
+		AddInDocumentation(t, "OK").
+		ExpectedRequest(t, GroupRequest{GroupID: 1}).
+		ExpectedResponse(t, expectedGroup())
+}
+
+func testGetGroupNotFoundCase(t *testing.T, ctr AccessController, cfg api.RequestConfiguration) {
+	t.Helper()
+	// arrange
+	mock.RPC(&ctr.getGroupRPC).Error(bb.NewNotFoundError("group not found"))
+
+	// act
+	api.TestAPICall(t, ctr, ctr.getGroup, asAdmin(cfg).WithPathVar("group_id", "2")).
+		AddInDocumentation(t, "A group not found").
+		ExpectedRequest(t, GroupRequest{GroupID: 2}).
+		ExpectedError(t, groupNotFound)
+}
+
+func Test_CreateGroupRoute(t *testing.T) {
+	t.Parallel()
+
+	api.GroupRouteTests(t, "POST /api/v1/admin/groups", NewAccessController).
+		Documentation(doc.ApiPublicDocumentationV1, openapi.Description("Creates a group.")).
+		Case("created", testCreateGroupCase)
+}
+
+func testCreateGroupCase(t *testing.T, ctr AccessController, cfg api.RequestConfiguration) {
+	t.Helper()
+	// arrange
+	mock.RPC(&ctr.createGroupRPC).Success(access.Group{ID: 1, Name: testGroup, RoleIDs: []int{}, MemberIDs: []int{}})
+	body := CreateGroupRequest{Name: testGroup}
+
+	// act
+	api.TestAPICall(t, ctr, ctr.createGroup, asAdmin(cfg).WithJSONBody(body)).
+		AddInDocumentation(t, "OK").
+		ExpectedRequest(t, body).
+		ExpectedResponse(t, Group{ID: 1, Name: testGroup, RoleIDs: []int{}, MemberIDs: []int{}})
+}
+
+func Test_UpdateGroupRoute(t *testing.T) {
+	t.Parallel()
+
+	api.GroupRouteTests(t, "PUT /api/v1/admin/groups/{group_id}", NewAccessController).
+		Documentation(doc.ApiPublicDocumentationV1, openapi.Description("Renames a group.")).
+		Case("updated", testUpdateGroupCase)
+}
+
+func testUpdateGroupCase(t *testing.T, ctr AccessController, cfg api.RequestConfiguration) {
+	t.Helper()
+	// arrange
+	mock.RPC(&ctr.updateGroupRPC).Success(testGroupAnswer())
+
+	// act
+	api.TestAPICall(t, ctr, ctr.updateGroup,
+		asAdmin(cfg).WithPathVar("group_id", "1").WithJSONBody(UpdateGroupRequest{GroupID: 0, Name: testGroup}),
+	).
+		AddInDocumentation(t, "OK").
+		ExpectedRequest(t, UpdateGroupRequest{GroupID: 1, Name: testGroup}).
+		ExpectedResponse(t, expectedGroup())
+}
+
+func Test_DeleteGroupRoute(t *testing.T) {
+	t.Parallel()
+
+	api.GroupRouteTests(t, "DELETE /api/v1/admin/groups/{group_id}", NewAccessController).
+		Documentation(
+			doc.ApiPublicDocumentationV1,
+			openapi.Description("Deletes a group; its members lose what it granted."),
+		).
+		Case("deleted", testDeleteGroupCase)
+}
+
+func testDeleteGroupCase(t *testing.T, ctr AccessController, cfg api.RequestConfiguration) {
+	t.Helper()
+	// arrange
+	mock.RPC(&ctr.deleteGroupRPC).Success(access.DeletedGroup{GroupID: 1})
+
+	// act
+	api.TestAPICall(t, ctr, ctr.deleteGroup, asAdmin(cfg).WithPathVar("group_id", "1")).
+		AddInDocumentation(t, "OK").
+		ExpectedRequest(t, GroupRequest{GroupID: 1}).
+		ExpectedResponse(t, Deleted{ID: 1})
+}
+
+func Test_AddGroupMemberRoute(t *testing.T) {
+	t.Parallel()
+
+	api.GroupRouteTests(t, "PUT /api/v1/admin/groups/{group_id}/members/{user_id}", NewAccessController).
+		Documentation(doc.ApiPublicDocumentationV1, openapi.Description("Puts a user into a group.")).
+		Case("added", testAddGroupMemberCase).
+		Case("not found", testAddGroupMemberNotFoundCase)
+}
+
+func testAddGroupMemberCase(t *testing.T, ctr AccessController, cfg api.RequestConfiguration) {
+	t.Helper()
+	// arrange
+	mock.RPC(&ctr.addGroupMemberRPC).Success(testGroupAnswer())
+
+	// act
+	api.TestAPICall(t, ctr, ctr.addGroupMember,
+		asAdmin(cfg).WithPathVar("group_id", "1").WithPathVar("user_id", "1"),
+	).
+		AddInDocumentation(t, "OK").
+		ExpectedRequest(t, GroupMemberRequest{GroupID: 1, UserID: adminID}).
+		ExpectedResponse(t, expectedGroup())
+}
+
+func testAddGroupMemberNotFoundCase(t *testing.T, ctr AccessController, cfg api.RequestConfiguration) {
+	t.Helper()
+	// arrange
+	mock.RPC(&ctr.addGroupMemberRPC).Error(bb.NewNotFoundError("user not found"))
+
+	// act
+	api.TestAPICall(t, ctr, ctr.addGroupMember,
+		asAdmin(cfg).WithPathVar("group_id", "1").WithPathVar("user_id", "9"),
+	).
+		AddInDocumentation(t, "A group or a user not found").
+		ExpectedError(t, memberNotFound)
+}
+
+func Test_RemoveGroupMemberRoute(t *testing.T) {
+	t.Parallel()
+
+	api.GroupRouteTests(t, "DELETE /api/v1/admin/groups/{group_id}/members/{user_id}", NewAccessController).
+		Documentation(doc.ApiPublicDocumentationV1, openapi.Description("Takes a user out of a group.")).
+		Case("removed", testRemoveGroupMemberCase)
+}
+
+func testRemoveGroupMemberCase(t *testing.T, ctr AccessController, cfg api.RequestConfiguration) {
+	t.Helper()
+	// arrange
+	mock.RPC(&ctr.removeGroupMemberRPC).Success(access.Group{
+		ID: 1, Name: testGroup, RoleIDs: []int{1}, MemberIDs: []int{},
+	})
+
+	// act
+	api.TestAPICall(t, ctr, ctr.removeGroupMember,
+		asAdmin(cfg).WithPathVar("group_id", "1").WithPathVar("user_id", "1"),
+	).
+		AddInDocumentation(t, "OK").
+		ExpectedRequest(t, GroupMemberRequest{GroupID: 1, UserID: adminID}).
+		ExpectedResponse(t, Group{ID: 1, Name: testGroup, RoleIDs: []int{1}, MemberIDs: []int{}})
+}
+
+func Test_GrantGroupRoleRoute(t *testing.T) {
+	t.Parallel()
+
+	api.GroupRouteTests(t, "PUT /api/v1/admin/groups/{group_id}/roles/{role_id}", NewAccessController).
+		Documentation(doc.ApiPublicDocumentationV1, openapi.Description("Grants a role to a group.")).
+		Case("granted", testGrantGroupRoleCase).
+		Case("not found", testGrantGroupRoleNotFoundCase)
+}
+
+func testGrantGroupRoleCase(t *testing.T, ctr AccessController, cfg api.RequestConfiguration) {
+	t.Helper()
+	// arrange
+	mock.RPC(&ctr.grantGroupRoleRPC).Success(testGroupAnswer())
+
+	// act
+	api.TestAPICall(t, ctr, ctr.grantGroupRole,
+		asAdmin(cfg).WithPathVar("group_id", "1").WithPathVar("role_id", "1"),
+	).
+		AddInDocumentation(t, "OK").
+		ExpectedRequest(t, GroupRoleRequest{GroupID: 1, RoleID: 1}).
+		ExpectedResponse(t, expectedGroup())
+}
+
+func testGrantGroupRoleNotFoundCase(t *testing.T, ctr AccessController, cfg api.RequestConfiguration) {
+	t.Helper()
+	// arrange
+	mock.RPC(&ctr.grantGroupRoleRPC).Error(bb.NewNotFoundError("role not found"))
+
+	// act
+	api.TestAPICall(t, ctr, ctr.grantGroupRole,
+		asAdmin(cfg).WithPathVar("group_id", "1").WithPathVar("role_id", "9"),
+	).
+		AddInDocumentation(t, "A group or a role not found").
+		ExpectedError(t, grantNotFound)
+}
+
+func Test_RevokeGroupRoleRoute(t *testing.T) {
+	t.Parallel()
+
+	api.GroupRouteTests(t, "DELETE /api/v1/admin/groups/{group_id}/roles/{role_id}", NewAccessController).
+		Documentation(doc.ApiPublicDocumentationV1, openapi.Description("Takes a role away from a group.")).
+		Case("revoked", testRevokeGroupRoleCase)
+}
+
+func testRevokeGroupRoleCase(t *testing.T, ctr AccessController, cfg api.RequestConfiguration) {
+	t.Helper()
+	// arrange
+	mock.RPC(&ctr.revokeGroupRoleRPC).Success(access.Group{
+		ID: 1, Name: testGroup, RoleIDs: []int{}, MemberIDs: []int{adminID},
+	})
+
+	// act
+	api.TestAPICall(t, ctr, ctr.revokeGroupRole,
+		asAdmin(cfg).WithPathVar("group_id", "1").WithPathVar("role_id", "1"),
+	).
+		AddInDocumentation(t, "OK").
+		ExpectedRequest(t, GroupRoleRequest{GroupID: 1, RoleID: 1}).
+		ExpectedResponse(t, Group{ID: 1, Name: testGroup, RoleIDs: []int{}, MemberIDs: []int{adminID}})
+}

@@ -22,7 +22,12 @@ func NewUserController() UserController {
 		deleteSessionRPC: client.DeleteSessionRPC,
 	}
 	ctrl.AddRoutes(
+{{- if .RBAC}}
+		// Require() requires no permission: it only reads them, for the answer.
+		gateway.JSONMethod("GET /api/v1/me", api.Require(), ctrl.me),
+{{- else}}
 		gateway.JSONMethod("GET /api/v1/me", api.AuthArea, ctrl.me),
+{{- end}}
 		gateway.JSONMethod("POST /api/v1/logout", api.PublicArea, ctrl.logout),
 	)
 
@@ -43,12 +48,34 @@ type Me struct {
 	ID    int    `json:"id"`
 	Email string `json:"email"`
 	Name  string `json:"name"`
+{{- if .RBAC}}
+	// Permissions let the application hide what the caller cannot do. The routes
+	// check them anyway.
+	Permissions []string `json:"permissions"`
+{{- end}}
 }
 
 type LoggedOut struct {
 	LoggedOut bool `json:"loggedOut"`
 }
 
+{{- if .RBAC}}
+// me answers who the caller is and what they are granted. The area function
+// already rejected everybody else.
+func (ctrl UserController) me(ctx api.AuthHTTPContext, _ MeRequest) (Me, gateway.HTTPError) {
+	granted := make([]string, 0, len(ctx.User.Permissions))
+	for _, permission := range ctx.User.Permissions {
+		granted = append(granted, string(permission))
+	}
+
+	return Me{
+		ID:          ctx.User.ID,
+		Email:       ctx.User.Email,
+		Name:        ctx.User.Name,
+		Permissions: granted,
+	}, nil
+}
+{{- else}}
 // me answers who the caller is. AuthArea already rejected everybody else.
 func (ctrl UserController) me(ctx api.AuthHTTPContext, _ MeRequest) (Me, gateway.HTTPError) {
 	return Me{
@@ -57,6 +84,7 @@ func (ctrl UserController) me(ctx api.AuthHTTPContext, _ MeRequest) (Me, gateway
 		Name:  ctx.User.Name,
 	}, nil
 }
+{{- end}}
 
 // logout drops the session, both here and on the caller side. It is a public
 // route: a caller whose session is already gone is logged out, not rejected.

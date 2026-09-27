@@ -2,6 +2,9 @@ package api
 
 import (
 	"net/http"
+{{- if .RBAC}}
+	"slices"
+{{- end}}
 	"sync"
 	"time"
 
@@ -9,6 +12,11 @@ import (
 	"{{.RizottoModule}}/gateway"
 	"{{.RizottoModule}}/settings/env"
 
+{{- if .RBAC}}
+
+	"{{.PermissionsImport}}"
+	access "{{.AccessClientImport}}"
+{{- end}}
 	user "{{.ClientImport}}"
 )
 
@@ -22,7 +30,19 @@ type SessionUser struct {
 	ID    int
 	Email string
 	Name  string
+{{- if .RBAC}}
+	// Permissions are what the groups of the user are granted. Only Require reads
+	// them: behind AuthArea they stay empty, and Can answers false.
+	Permissions []permissions.Permission
+{{- end}}
 }
+{{- if .RBAC}}
+
+// Can tells whether the user is granted the permission.
+func (u SessionUser) Can(permission permissions.Permission) bool {
+	return slices.Contains(u.Permissions, permission)
+}
+{{- end}}
 
 // AuthHTTPContext is the context of the routes AuthArea guards. A handler taking
 // it can rely on User being there: the request never reaches it otherwise.
@@ -32,8 +52,18 @@ type AuthHTTPContext struct {
 	User SessionUser
 }
 
+{{- if .RBAC}}
+//nolint:gochecknoglobals // one value shared by every private route
+var (
+	unauthorized = gateway.NewUnauthorizedError("Authentication required")
+	forbidden    = gateway.NewForbiddenError(
+		gateway.ForbiddenErrorCode, "Forbidden", "The caller is not granted what this route requires",
+	)
+)
+{{- else}}
 //nolint:gochecknoglobals // one value shared by every private route
 var unauthorized = gateway.NewUnauthorizedError("Authentication required")
+{{- end}}
 
 // The session reader is bound on first use: the area function is referenced while
 // the controllers are built, which happens before the service is registered.
@@ -51,13 +81,29 @@ func sessionReader() user.GetSessionRPC {
 
 	return getSession
 }
+{{- if .RBAC}}
+
+//nolint:gochecknoglobals // the binding is process wide, like the bb registry
+var (
+	getPermissions     access.GetUserPermissionsRPC
+	getPermissionsOnce sync.Once
+)
+
+func permissionReader() access.GetUserPermissionsRPC {
+	getPermissionsOnce.Do(func() {
+		getPermissions = access.BindClient().GetUserPermissionsRPC
+	})
+
+	return getPermissions
+}
+{{- end}}
 
 // AuthArea builds the context of the routes that require an authenticated user.
 // Answering an error rejects the request before the handler runs.
 func AuthArea(ctx rizotto.HTTPContext) (AuthHTTPContext, rizotto.HTTPError) {
 	empty := AuthHTTPContext{
 		HTTPContext: ctx,
-		User:        SessionUser{ID: 0, Email: "", Name: ""},
+		User:        SessionUser{ID: 0, Email: "", Name: ""{{if .RBAC}}, Permissions: nil{{end}}},
 	}
 
 	token, found := SessionToken(ctx)
@@ -76,9 +122,47 @@ func AuthArea(ctx rizotto.HTTPContext) (AuthHTTPContext, rizotto.HTTPError) {
 			ID:    session.User.ID,
 			Email: session.User.Email,
 			Name:  session.User.Name,
+{{- if .RBAC}}
+			Permissions: nil,
+{{- end}}
 		},
 	}, nil
 }
+{{- if .RBAC}}
+
+// Require builds the area function of the routes that need permissions: the
+// caller has to be authenticated, as with AuthArea, and granted every one of
+// required, or the request is answered 403 before the handler runs. Behind it
+// ctx.User.Permissions holds everything the caller is granted, so Require() with
+// no permission at all is how a route reads them without requiring any.
+func Require(
+	required ...permissions.Permission,
+) func(ctx rizotto.HTTPContext) (AuthHTTPContext, rizotto.HTTPError) {
+	return func(ctx rizotto.HTTPContext) (AuthHTTPContext, rizotto.HTTPError) {
+		authenticated, httpErr := AuthArea(ctx)
+		if httpErr != nil {
+			return authenticated, httpErr
+		}
+
+		granted, err := permissionReader()(ctx, access.GetUserPermissionsRequest{UserID: authenticated.User.ID})
+		if err != nil {
+			return authenticated, gateway.MapError(err).Others(gateway.NewInternalError())
+		}
+
+		for _, permission := range granted.Permissions {
+			authenticated.User.Permissions = append(authenticated.User.Permissions, permissions.Permission(permission))
+		}
+
+		for _, permission := range required {
+			if !authenticated.User.Can(permission) {
+				return authenticated, forbidden
+			}
+		}
+
+		return authenticated, nil
+	}
+}
+{{- end}}
 
 // SessionToken reads the session token of the request.
 func SessionToken(ctx rizotto.HTTPContext) (string, bool) {

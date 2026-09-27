@@ -7,20 +7,49 @@ package db
 import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
-
-type User struct {
+{{if .RBAC}}
+type Group struct {
 	ID        int64
-	Email     string
 	Name      string
 	CreatedAt pgtype.Timestamp
 	UpdatedAt pgtype.Timestamp
 }
 
+type GroupMember struct {
+	GroupID int64
+	UserID  int64
+}
+
+type GroupRole struct {
+	GroupID int64
+	RoleID  int64
+}
+
+type Role struct {
+	ID        int64
+	Name      string
+	CreatedAt pgtype.Timestamp
+	UpdatedAt pgtype.Timestamp
+}
+
+type RolePermission struct {
+	RoleID     int64
+	Permission string
+}
+{{end}}
 type Session struct {
 	ID        int64
 	TokenHash string
 	UserID    int64
 	ExpiresAt pgtype.Timestamp
+	CreatedAt pgtype.Timestamp
+	UpdatedAt pgtype.Timestamp
+}
+
+type User struct {
+	ID        int64
+	Email     string
+	Name      string
 	CreatedAt pgtype.Timestamp
 	UpdatedAt pgtype.Timestamp
 }

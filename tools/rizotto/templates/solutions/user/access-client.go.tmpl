@@ -1,0 +1,121 @@
+// Package access is the contract of the groups, roles and permissions of the User
+// service. A user is granted what the roles of their groups are granted; roles are
+// never given to a user directly.
+package access
+
+import (
+	"context"
+
+	"{{.RizottoModule}}/bb"
+
+	user "{{.ClientImport}}"
+)
+
+// The public codes of the validation errors of this contract.
+const (
+	// NameTakenCode answers a role or a group named like another one.
+	NameTakenCode = "name_taken"
+	// UnknownPermissionCode answers a role granted a permission the project does
+	// not declare.
+	UnknownPermissionCode = "unknown_permission"
+)
+
+// UserPermissions is everything the groups of a user are granted.
+type UserPermissions struct {
+	UserID      int
+	Permissions []string
+}
+
+type Role struct {
+	ID          int
+	Name        string
+	Permissions []string
+}
+
+type Group struct {
+	ID        int
+	Name      string
+	RoleIDs   []int
+	MemberIDs []int
+}
+
+type GetUserPermissionsRequest struct {
+	UserID int
+}
+
+type ListUsersRequest struct {
+	Offset int
+	Limit  int
+}
+
+type UserList struct {
+	Offset int
+	Limit  int
+	Users  []user.User
+}
+
+type ListRolesRequest struct{}
+
+type RoleList struct {
+	Roles []Role
+}
+
+type CreateRoleRequest struct {
+	Name        string
+	Permissions []string
+}
+
+// UpdateRoleRequest renames the role and replaces its permissions.
+type UpdateRoleRequest struct {
+	RoleID      int
+	Name        string
+	Permissions []string
+}
+
+type RoleRequest struct {
+	RoleID int
+}
+
+type DeletedRole struct {
+	RoleID int
+}
+
+type ListGroupsRequest struct{}
+
+type GroupList struct {
+	Groups []Group
+}
+
+type CreateGroupRequest struct {
+	Name string
+}
+
+type UpdateGroupRequest struct {
+	GroupID int
+	Name    string
+}
+
+type GroupRequest struct {
+	GroupID int
+}
+
+type DeletedGroup struct {
+	GroupID int
+}
+
+type GroupMemberRequest struct {
+	GroupID int
+	UserID  int
+}
+
+type GroupRoleRequest struct {
+	GroupID int
+	RoleID  int
+}
+
+//go:generate genbind -client AccessClient
+type AccessClient interface { //nolint:interfacebloat // one method per RPC of the contract
+{{- range .AccessMethods}}
+	// bind-method: {{.Address}}
+	{{.Name}}(ctx context.Context, req {{.Request}}) ({{.Response}}, bb.ServiceError)
+{{end}}}

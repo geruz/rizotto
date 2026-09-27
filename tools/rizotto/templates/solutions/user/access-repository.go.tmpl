@@ -1,0 +1,213 @@
+package repository
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"{{.RizottoModule}}/pg"
+
+	"{{.Module}}/{{.Dir}}/repository/db"
+)
+
+// AccessRepository reads and writes the groups, the roles and what they grant.
+type AccessRepository struct {
+	pg.Repository
+
+	queries *db.Queries
+}
+
+func NewAccessRepository(pool *pgxpool.Pool) AccessRepository {
+	return AccessRepository{
+		Repository: pg.NewRepository(pool),
+		queries:    db.New(pool),
+	}
+}
+
+func (r AccessRepository) GetUserPermissions(ctx context.Context, userID int64) ([]string, error) {
+	return r.queries.GetUserPermissions(ctx, userID)
+}
+
+func (r AccessRepository) ListUsers(ctx context.Context, offset, limit int64) ([]db.User, error) {
+	return r.queries.ListUsers(ctx, db.ListUsersParams{PageOffset: offset, PageLimit: limit})
+}
+
+func (r AccessRepository) GetUser(ctx context.Context, id int64) (db.User, error) {
+	return r.queries.GetUser(ctx, id)
+}
+
+func (r AccessRepository) FindUsersByEmail(ctx context.Context, email string) ([]db.User, error) {
+	return r.queries.FindUsersByEmail(ctx, email)
+}
+
+func (r AccessRepository) CreateUser(ctx context.Context, email, name string) (db.User, error) {
+	return r.queries.CreateUser(ctx, db.CreateUserParams{Email: email, Name: name})
+}
+
+func (r AccessRepository) ListRoles(ctx context.Context) ([]db.Role, error) {
+	return r.queries.ListRoles(ctx)
+}
+
+func (r AccessRepository) GetRole(ctx context.Context, id int64) (db.Role, error) {
+	return r.queries.GetRole(ctx, id)
+}
+
+func (r AccessRepository) ListAllRolePermissions(ctx context.Context) ([]db.RolePermission, error) {
+	return r.queries.ListAllRolePermissions(ctx)
+}
+
+func (r AccessRepository) ListRolePermissions(ctx context.Context, roleID int64) ([]string, error) {
+	return r.queries.ListRolePermissions(ctx, roleID)
+}
+
+// CreateRole creates the role together with its permissions, or nothing at all.
+func (r AccessRepository) CreateRole(ctx context.Context, name string, permissions []string) (db.Role, error) {
+	var role db.Role
+
+	err := r.inTx(ctx, func(q *db.Queries) error {
+		var err error
+
+		role, err = q.CreateRole(ctx, name)
+		if err != nil {
+			return err
+		}
+
+		return addRolePermissions(ctx, q, role.ID, permissions)
+	})
+
+	return role, err
+}
+
+// UpdateRole renames the role and replaces its permissions in one go.
+func (r AccessRepository) UpdateRole(
+	ctx context.Context, id int64, name string, permissions []string,
+) (db.Role, error) {
+	var role db.Role
+
+	err := r.inTx(ctx, func(q *db.Queries) error {
+		var err error
+
+		role, err = q.UpdateRole(ctx, db.UpdateRoleParams{ID: id, Name: name})
+		if err != nil {
+			return err
+		}
+
+		err = q.ClearRolePermissions(ctx, id)
+		if err != nil {
+			return err
+		}
+
+		return addRolePermissions(ctx, q, id, permissions)
+	})
+
+	return role, err
+}
+
+// EnsureRole answers the role of that name, creating it when it is missing, and
+// grants it the permissions on top of whatever it has.
+func (r AccessRepository) EnsureRole(ctx context.Context, name string, permissions []string) (db.Role, error) {
+	var role db.Role
+
+	err := r.inTx(ctx, func(q *db.Queries) error {
+		var err error
+
+		role, err = q.EnsureRole(ctx, name)
+		if err != nil {
+			return err
+		}
+
+		return addRolePermissions(ctx, q, role.ID, permissions)
+	})
+
+	return role, err
+}
+
+func (r AccessRepository) DeleteRole(ctx context.Context, id int64) (int64, error) {
+	return r.queries.DeleteRole(ctx, id)
+}
+
+func (r AccessRepository) ListGroups(ctx context.Context) ([]db.Group, error) {
+	return r.queries.ListGroups(ctx)
+}
+
+func (r AccessRepository) GetGroup(ctx context.Context, id int64) (db.Group, error) {
+	return r.queries.GetGroup(ctx, id)
+}
+
+func (r AccessRepository) CreateGroup(ctx context.Context, name string) (db.Group, error) {
+	return r.queries.CreateGroup(ctx, name)
+}
+
+func (r AccessRepository) EnsureGroup(ctx context.Context, name string) (db.Group, error) {
+	return r.queries.EnsureGroup(ctx, name)
+}
+
+func (r AccessRepository) UpdateGroup(ctx context.Context, id int64, name string) (db.Group, error) {
+	return r.queries.UpdateGroup(ctx, db.UpdateGroupParams{ID: id, Name: name})
+}
+
+func (r AccessRepository) DeleteGroup(ctx context.Context, id int64) (int64, error) {
+	return r.queries.DeleteGroup(ctx, id)
+}
+
+func (r AccessRepository) ListAllGroupRoles(ctx context.Context) ([]db.GroupRole, error) {
+	return r.queries.ListAllGroupRoles(ctx)
+}
+
+func (r AccessRepository) ListGroupRoles(ctx context.Context, groupID int64) ([]int64, error) {
+	return r.queries.ListGroupRoles(ctx, groupID)
+}
+
+func (r AccessRepository) AddGroupRole(ctx context.Context, groupID, roleID int64) error {
+	return r.queries.AddGroupRole(ctx, db.AddGroupRoleParams{GroupID: groupID, RoleID: roleID})
+}
+
+func (r AccessRepository) RemoveGroupRole(ctx context.Context, groupID, roleID int64) error {
+	return r.queries.RemoveGroupRole(ctx, db.RemoveGroupRoleParams{GroupID: groupID, RoleID: roleID})
+}
+
+func (r AccessRepository) ListAllGroupMembers(ctx context.Context) ([]db.GroupMember, error) {
+	return r.queries.ListAllGroupMembers(ctx)
+}
+
+func (r AccessRepository) ListGroupMembers(ctx context.Context, groupID int64) ([]int64, error) {
+	return r.queries.ListGroupMembers(ctx, groupID)
+}
+
+func (r AccessRepository) AddGroupMember(ctx context.Context, groupID, userID int64) error {
+	return r.queries.AddGroupMember(ctx, db.AddGroupMemberParams{GroupID: groupID, UserID: userID})
+}
+
+func (r AccessRepository) RemoveGroupMember(ctx context.Context, groupID, userID int64) error {
+	return r.queries.RemoveGroupMember(ctx, db.RemoveGroupMemberParams{GroupID: groupID, UserID: userID})
+}
+
+// inTx runs the queries in one transaction, committed only when all of them
+// succeed.
+func (r AccessRepository) inTx(ctx context.Context, run func(q *db.Queries) error) error {
+	tx, err := r.Conn().Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin the transaction: %w", err)
+	}
+
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	err = run(r.queries.WithTx(tx))
+	if err != nil {
+		return err
+	}
+
+	return tx.Commit(ctx)
+}
+
+func addRolePermissions(ctx context.Context, q *db.Queries, roleID int64, permissions []string) error {
+	for _, permission := range permissions {
+		err := q.AddRolePermission(ctx, db.AddRolePermissionParams{RoleID: roleID, Permission: permission})
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}

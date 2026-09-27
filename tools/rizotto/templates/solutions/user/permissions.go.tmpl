@@ -1,0 +1,31 @@
+// Package permissions lists what the users of {{.Module}} may be allowed to do.
+//
+// A permission lives in the code rather than in the database, because the code
+// checking it is what gives it a meaning. Roles, stored in the database, only
+// name sets of these, and a role can be granted nothing that is not listed here.
+package permissions
+
+import "slices"
+
+// Permission is one thing a user may be allowed to do, e.g. "orders.write".
+type Permission string
+
+const (
+	// UsersManage lets a user manage the users, the groups and the roles: every
+	// route of api/access-api requires it.
+	UsersManage Permission = "users.manage"
+)
+
+// All lists every permission of the project. Add a permission here when you add
+// its constant: a role can only be granted what this list holds, and the admins
+// of ADMIN_EMAILS are granted all of it.
+func All() []Permission {
+	return []Permission{
+		UsersManage,
+	}
+}
+
+// Known tells whether the permission is one of All.
+func Known(permission string) bool {
+	return slices.Contains(All(), Permission(permission))
+}

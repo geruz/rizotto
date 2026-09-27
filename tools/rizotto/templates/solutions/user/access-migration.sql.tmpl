@@ -1,28 +1,4 @@
--- The email is deliberately not unique: how a person is identified is the business
--- of whatever authenticates them, not of this table.
-CREATE TABLE public.users (
-    id BIGSERIAL PRIMARY KEY,
-    email VARCHAR(255) NOT NULL,
-    name VARCHAR(255) NOT NULL,
-    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMP NOT NULL DEFAULT NOW()
-);
-
--- Only the fingerprint of a session token is kept, never the token itself.
-CREATE TABLE public.sessions (
-    id BIGSERIAL PRIMARY KEY,
-    token_hash VARCHAR(64) NOT NULL UNIQUE,
-    user_id BIGINT NOT NULL REFERENCES public.users (id) ON DELETE CASCADE,
-    expires_at TIMESTAMP NOT NULL,
-    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMP NOT NULL DEFAULT NOW()
-);
-
-CREATE INDEX users_email_idx ON public.users (lower(email));
-
-CREATE INDEX sessions_user_id_idx ON public.sessions (user_id);
-{{- if .RBAC}}
-
+-- migrate:up
 -- A role is a named set of permissions. The permissions themselves are declared in
 -- the code of the project, which is what checks them; a row only names one.
 CREATE TABLE public.roles (
@@ -62,4 +38,10 @@ CREATE TABLE public.group_roles (
 );
 
 CREATE INDEX group_roles_role_id_idx ON public.group_roles (role_id);
-{{- end}}
+
+-- migrate:down
+DROP TABLE public.group_roles;
+DROP TABLE public.group_members;
+DROP TABLE public.groups;
+DROP TABLE public.role_permissions;
+DROP TABLE public.roles;

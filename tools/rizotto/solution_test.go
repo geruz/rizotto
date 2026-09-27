@@ -14,6 +14,7 @@ const (
 	providersFlag = "-providers"
 	sessionFlag   = "-session"
 	downloadFlag  = "-download"
+	rbacFlag      = "-rbac"
 	forceFlag     = "-force"
 )
 
@@ -62,10 +63,12 @@ func Test_runSolution_AsksEveryStep(t *testing.T) {
 
 	err := runSolution(
 		[]string{addCommand, userSolutionName, projectFlag, root, skipTidyFlag},
-		strings.NewReader(sessionCookie+"\n"), out)
+		strings.NewReader(sessionCookie+"\nyes\n"), out)
 	must.NoError(t, err)
 
 	must.StrContains(t, out.String(), "Session in a cookie or a bearer header")
+	must.StrContains(t, out.String(), "Groups, roles and permissions")
+	must.FileExists(t, filepath.Join(root, "api", "access-api", "access.go"))
 }
 
 func Test_runSolutionAdd_WritesTheUserVertical(t *testing.T) {
@@ -97,6 +100,43 @@ func Test_runSolutionAdd_WritesTheUserVertical(t *testing.T) {
 	// the user solution knows nothing about logging somebody in
 	must.DirNotExists(t, filepath.Join(root, "services", "identity"))
 	must.FileNotExists(t, filepath.Join(root, "api", "oauth-api", "oauth.go"))
+
+	// and, without -rbac, nothing about groups, roles and permissions
+	must.DirNotExists(t, filepath.Join(root, "services", "user", "access-client"))
+	must.DirNotExists(t, filepath.Join(root, "permissions"))
+	must.StrNotContains(t, readFile(t, root, "api/auth-area.go"), "func Require(")
+	must.StrNotContains(t, readFile(t, root, "services/user/repository/sql/schema.sql"), "public.roles")
+}
+
+func Test_runSolutionAdd_WritesTheRBACVertical(t *testing.T) {
+	t.Parallel()
+
+	root := newSQLProjectDir(t)
+	out := &bytes.Buffer{}
+
+	err := runSolution(
+		addSolutionArgs(userSolutionName, root, sessionFlag, sessionBearer, rbacFlag), strings.NewReader(""), out)
+	must.NoError(t, err)
+
+	printed := out.String()
+	mustHaveFiles(t, root, written(printed),
+		"permissions/permissions.go",
+		"services/user/access-client/client.go",
+		"services/user/access-client/bind-gen.go",
+		"services/user/access-service.go",
+		"services/user/repository/access-repository.go",
+		"services/user/repository/migrations/000002_create_access.sql",
+		"api/accesstest/accesstest.go",
+		"api/access-api/access.go",
+		"api/access-api/access_test.go",
+	)
+
+	must.StrContains(t, readFile(t, root, "api/auth-area.go"), "func Require(")
+	must.StrContains(t, readFile(t, root, "api/user-api/user.go"), "api.Require()")
+	must.StrContains(t, readFile(t, root, "services/user/repository/sql/schema.sql"), "CREATE TABLE public.group_roles")
+	must.StrContains(t, readFile(t, root, "services/user/repository/db/models.go"), "type RolePermission struct")
+	must.StrContains(t, printed, "ADMIN_EMAILS")
+	must.StrContains(t, printed, "accessSrv.MustBootstrapAdmins(ctx)")
 }
 
 // Test_runSolutionAdd_InstallsWhatItRequires pins the dependency mechanism: oauth
