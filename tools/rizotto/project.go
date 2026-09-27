@@ -35,8 +35,6 @@ type project struct {
 	RizottoPath string
 	// RizottoModule is the import path of the framework.
 	RizottoModule string
-	// SQL tells whether the project needs PostgreSQL.
-	SQL bool
 }
 
 var (
@@ -141,7 +139,7 @@ func replaceHostSeparator(repo string) string {
 	return host + "/" + rest
 }
 
-func newProject(name, repo, goVersion, rizottoPath string, withSQL bool) (project, error) {
+func newProject(name, repo, goVersion, rizottoPath string) (project, error) {
 	name, err := normalizeName(name)
 	if err != nil {
 		return project{}, err
@@ -171,7 +169,6 @@ func newProject(name, repo, goVersion, rizottoPath string, withSQL bool) (projec
 		GoVersion:     goVersion,
 		RizottoPath:   rizottoPath,
 		RizottoModule: rizottoModule,
-		SQL:           withSQL,
 	}, nil
 }
 

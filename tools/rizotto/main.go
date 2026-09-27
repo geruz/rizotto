@@ -27,8 +27,8 @@ Usage:
 	rizotto help
 
 Commands:
-	make-project   create a new rizotto project, asking for its name, directory,
-	               git repository and whether it needs SQL
+	make-project   create a new rizotto project with PostgreSQL, asking for its
+	               name, directory and git repository
 	service add    scaffold a service in an existing project, asking whether it
 	               works with the database and which CRUD methods it needs
 	controller add scaffold an HTTP controller for one of the services, asking
@@ -66,7 +66,6 @@ var (
 	errUsage          = errors.New("wrong usage")
 	errUnknownCommand = errors.New("unknown command")
 	errTargetNotEmpty = errors.New("target directory is not empty, pass -force to generate into it anyway")
-	errSQLAnswer      = errors.New(`-sql expects "yes" or "no"`)
 )
 
 // runCommand dispatches one command and returns errUnknownCommand for a name
@@ -122,7 +121,6 @@ type makeProjectFlags struct {
 	name        string
 	path        string
 	repo        string
-	sql         string
 	rizottoPath string
 	goVersion   string
 	force       bool
@@ -138,8 +136,6 @@ func bindMakeProjectFlags(fs *flag.FlagSet) *makeProjectFlags {
 	fs.StringVar(&f.path, "path", "", `directory the project folder is created in (default ".")`)
 	fs.StringVar(&f.repo, "repo", "",
 		"git repository of the project; it becomes the go module path (github.com/acme/shop)")
-	fs.StringVar(&f.sql, "sql", "",
-		`"yes" to scaffold PostgreSQL support, "no" to skip it; when omitted the author is asked`)
 	fs.StringVar(&f.rizottoPath, "rizotto-path", "",
 		"path to a local rizotto checkout; adds a replace directive to the generated go.mod")
 	fs.StringVar(&f.goVersion, "go-version", "", "go directive of the generated go.mod (default: the running toolchain)")
@@ -199,12 +195,12 @@ func runMakeProject(args []string, in io.Reader, out io.Writer) error {
 		addWebSkills(out, target)
 	}
 
-	printNextSteps(out, prj, target)
+	printNextSteps(out, target)
 
 	return nil
 }
 
-// askProject collects the answers of the four steps, skipping the ones already
+// askProject collects the answers of the three steps, skipping the ones already
 // given as flags, and returns the project together with its target directory.
 func askProject(flags *makeProjectFlags, pr *prompter) (project, string, error) {
 	name, err := answer(pr, flags.name, "Project name (english letters and digits, e.g. MyShop)", "", normalizeName)
@@ -222,12 +218,7 @@ func askProject(flags *makeProjectFlags, pr *prompter) (project, string, error) 
 		return project{}, "", err
 	}
 
-	withSQL, err := resolveSQL(flags.sql, pr)
-	if err != nil {
-		return project{}, "", err
-	}
-
-	prj, err := newProject(name, repo, flags.goVersion, flags.rizottoPath, withSQL)
+	prj, err := newProject(name, repo, flags.goVersion, flags.rizottoPath)
 	if err != nil {
 		return project{}, "", err
 	}
@@ -253,20 +244,6 @@ func answer(
 	}
 
 	return value, nil
-}
-
-// resolveSQL reads the -sql flag and falls back to asking the author.
-func resolveSQL(flagValue string, pr *prompter) (bool, error) {
-	if flagValue == "" {
-		return pr.askYesNo("Does the project need SQL (PostgreSQL + sqlc + dbmate)?", false)
-	}
-
-	withSQL, ok := parseYesNo(flagValue)
-	if !ok {
-		return false, fmt.Errorf("%w: %w, got %q", errUsage, errSQLAnswer, flagValue)
-	}
-
-	return withSQL, nil
 }
 
 // dispatchAdd routes the "add", "skill" and "help" subcommands of a command.
@@ -329,12 +306,7 @@ func ensureTargetDir(target string, force bool) error {
 }
 
 func report(out io.Writer, prj project, target string, files []string) {
-	sql := "without SQL"
-	if prj.SQL {
-		sql = "with SQL"
-	}
-
-	_, _ = fmt.Fprintf(out, "Created project %q (%s) in %s\n", prj.Name, sql, target)
+	_, _ = fmt.Fprintf(out, "Created project %q in %s\n", prj.Name, target)
 
 	for _, file := range files {
 		_, _ = fmt.Fprintln(out, "  "+file)
@@ -438,13 +410,14 @@ func addWebSkills(out io.Writer, target string) {
 	}
 }
 
-func printNextSteps(out io.Writer, prj project, target string) {
-	steps := []string{"cd " + target, "task deps"}
-	if prj.SQL {
-		steps = append(steps, "task migrate-up")
+func printNextSteps(out io.Writer, target string) {
+	steps := []string{
+		"cd " + target,
+		"task deps",
+		"task migrate-up  # starts PostgreSQL in docker and applies the migrations",
+		"task start       # the server on :9090",
+		"task web:dev     # the React app on :5173",
 	}
-
-	steps = append(steps, "task start      # the server on :9090", "task web:dev    # the React app on :5173")
 
 	_, _ = fmt.Fprintln(out, "\nNext steps:")
 

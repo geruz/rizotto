@@ -30,24 +30,60 @@ tasks:
         silent: true
 
     gen:
-        desc: Regenerate the service bindings{{if .SQL}} and the sqlc queries{{end}}
+        desc: Regenerate the service bindings and the sqlc queries
         cmds:
             - task -d server gen
         silent: true
-{{- if .SQL}}
+
+    db:start:
+        desc: Start the local PostgreSQL on :5432
+        cmds:
+            - task -d server db:start
+        silent: true
+
+    db:stop:
+        desc: Stop the local PostgreSQL, keeping its data
+        cmds:
+            - task -d server db:stop
+        silent: true
+
+    db:reset:
+        desc: Delete the local PostgreSQL together with its data; migrate-up creates it again
+        prompt: This deletes every row of the local database. Continue?
+        cmds:
+            # asked here once; the prompt of server/Taskfile.yml would not see --yes
+            - task -d server --yes db:reset
+        silent: true
 
     migrate-up:
-        desc: Apply the migrations of every service
+        desc: Apply the pending migrations of every service to the local PostgreSQL
         cmds:
             - task -d server migrate-up
         silent: true
 
-    migrate-down:
-        desc: Roll back the last migration of every service
+    migrate-status:
+        desc: List the applied and the pending migrations of every service
         cmds:
-            - task -d server migrate-down
+            - task -d server migrate-status
         silent: true
-{{- end}}
+
+    migrate-down:
+        desc: "Roll back the last migration of one service: task migrate-down -- item"
+        cmds:
+            - task -d server migrate-down -- {{`{{.CLI_ARGS}}`}}
+        silent: true
+
+    migrate-redo:
+        desc: "Roll back the last migration of one service and apply it again: task migrate-redo -- item"
+        cmds:
+            - task -d server migrate-redo -- {{`{{.CLI_ARGS}}`}}
+        silent: true
+
+    migrate-new:
+        desc: "Create a migration: task migrate-new -- item add_price_to_items"
+        cmds:
+            - task -d server migrate-new -- {{`{{.CLI_ARGS}}`}}
+        silent: true
 
     web:dev:
         desc: Run the React app on :5173, proxying /api to the server
@@ -65,3 +101,8 @@ tasks:
         desc: Build the docker image with the server and the web app
         cmds:
             - docker build -f .docker/Dockerfile -t {{.Slug}} .
+
+    docker:build:migrations:
+        desc: Build the docker image {{.Slug}}-migrations, which applies the migrations to $DATABASE_URL
+        cmds:
+            - docker build -f .docker/migrations.Dockerfile -t {{.Slug}}-migrations .

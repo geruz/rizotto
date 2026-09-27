@@ -20,7 +20,7 @@ top; a project with its own way of authenticating people uses this one alone.
 Flags:
 	-session     where the session token travels: "cookie" or "bearer" (default "cookie")
 
-The project must have been scaffolded with SQL, since the solution owns tables.
+The project must have sqlc.yaml (make-project writes it), since the solution owns tables.
 `
 
 const (
@@ -178,27 +178,19 @@ func (u userSpec) files() []fileSpec {
 	dir := u.Dir()
 
 	return []fileSpec{
-		{tmpl: "solutions/user/client.go.tmpl", out: dir + "/user-client/client.go", sqlOnly: always},
-		{tmpl: "solutions/user/bind-gen.go.tmpl", out: dir + "/user-client/bind-gen.go", sqlOnly: always},
-		{tmpl: "solutions/user/user-service.go.tmpl", out: dir + "/user-service.go", sqlOnly: always},
-		{tmpl: "solutions/user/repository.go.tmpl", out: dir + "/repository/user-repository.go", sqlOnly: always},
-		{tmpl: "solutions/user/schema.sql.tmpl", out: dir + "/repository/sql/schema.sql", sqlOnly: always},
-		{tmpl: "solutions/user/queries.sql.tmpl", out: dir + "/repository/sql/user-queries.sql", sqlOnly: always},
-		{
-			tmpl:    "solutions/user/migration.sql.tmpl",
-			out:     dir + "/repository/migrations/000001_create_users.sql",
-			sqlOnly: always,
-		},
-		{tmpl: "solutions/user/db/db.go.tmpl", out: dir + "/repository/db/db.go", sqlOnly: always},
-		{tmpl: "solutions/user/db/models.go.tmpl", out: dir + "/repository/db/models.go", sqlOnly: always},
-		{
-			tmpl:    "solutions/user/db/queries.sql.go.tmpl",
-			out:     dir + "/repository/db/user-queries.sql.go",
-			sqlOnly: always,
-		},
-		{tmpl: "solutions/user/auth-area.go.tmpl", out: "api/auth-area.go", sqlOnly: always},
-		{tmpl: "solutions/user/user-api.go.tmpl", out: "api/user-api/user.go", sqlOnly: always},
-		{tmpl: "solutions/user/user-api_test.go.tmpl", out: "api/user-api/user_test.go", sqlOnly: always},
+		{tmpl: "solutions/user/client.go.tmpl", out: dir + "/user-client/client.go"},
+		{tmpl: "solutions/user/bind-gen.go.tmpl", out: dir + "/user-client/bind-gen.go"},
+		{tmpl: "solutions/user/user-service.go.tmpl", out: dir + "/user-service.go"},
+		{tmpl: "solutions/user/repository.go.tmpl", out: dir + "/repository/user-repository.go"},
+		{tmpl: "solutions/user/schema.sql.tmpl", out: dir + "/repository/sql/schema.sql"},
+		{tmpl: "solutions/user/queries.sql.tmpl", out: dir + "/repository/sql/user-queries.sql"},
+		{tmpl: "solutions/user/migration.sql.tmpl", out: dir + "/repository/migrations/000001_create_users.sql"},
+		{tmpl: "solutions/user/db/db.go.tmpl", out: dir + "/repository/db/db.go"},
+		{tmpl: "solutions/user/db/models.go.tmpl", out: dir + "/repository/db/models.go"},
+		{tmpl: "solutions/user/db/queries.sql.go.tmpl", out: dir + "/repository/db/user-queries.sql.go"},
+		{tmpl: "solutions/user/auth-area.go.tmpl", out: "api/auth-area.go"},
+		{tmpl: "solutions/user/user-api.go.tmpl", out: "api/user-api/user.go"},
+		{tmpl: "solutions/user/user-api_test.go.tmpl", out: "api/user-api/user_test.go"},
 	}
 }
 

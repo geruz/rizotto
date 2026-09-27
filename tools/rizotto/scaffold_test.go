@@ -16,11 +16,11 @@ const (
 	testRepo = "github.com/acme/shop"
 )
 
-func Test_generate_ProjectWithoutSQL(t *testing.T) {
+func Test_generate_Project(t *testing.T) {
 	t.Parallel()
 
 	target := t.TempDir()
-	prj := mustNewProject(t, testName, false)
+	prj := mustNewProject(t, testName)
 
 	files, err := generateProject(prj, target)
 	must.NoError(t, err)
@@ -52,14 +52,8 @@ func Test_generate_ProjectWithoutSQL(t *testing.T) {
 		"web/vite.config.ts",
 	)
 
-	for _, notGenerated := range []string{"server/sqlc.yaml", "server/services/item/repository/db/db.go"} {
-		must.SliceNotContains(t, files, notGenerated)
-	}
-
 	must.StrContains(t, readFile(t, target, "server/go.mod"), "module "+testRepo+"/server\n")
-	must.StrNotContains(t, readFile(t, target, "server/.env"), "DATABASE_URL")
 	must.StrContains(t, readFile(t, target, "server/.env.example"), "SERVICE_NAME=myshop")
-	must.StrContains(t, readFile(t, target, "server/server.go"), "itemsrv.NewItemService()")
 	must.StrContains(t, readFile(t, target, "server/services/item/item-service.go"), "[]item.Item")
 	must.StrContains(t, readFile(t, target, "server/services/item/item-client/client.go"),
 		"http://item-service/item/get")
@@ -67,7 +61,6 @@ func Test_generate_ProjectWithoutSQL(t *testing.T) {
 	must.StrContains(t, readFile(t, target, "web/package.json"), `"name": "myshop-web"`)
 	must.StrContains(t, readFile(t, target, "web/vite.config.ts"), `"/api": "http://localhost:9090"`)
 	must.StrContains(t, readFile(t, target, "web/src/App.tsx"), "<CardTitle>MyShop</CardTitle>")
-	must.StrNotContains(t, readFile(t, target, "Taskfile.yml"), "migrate-up")
 	must.StrContains(t, readFile(t, target, "Taskfile.yml"), "docker build -f .docker/Dockerfile -t myshop .")
 	must.StrContains(t, readFile(t, target, ".docker/Dockerfile"), "COPY --from=web /src/web/dist ./static")
 	must.StrContains(t, readFile(t, target, ".docker/env"), "STATIC_DIR=/app/static")
@@ -78,16 +71,20 @@ func Test_generate_ProjectWithoutSQL(t *testing.T) {
 	must.StrContains(t, skill, "rizotto skill")
 }
 
-func Test_generate_ProjectWithSQL(t *testing.T) {
+func Test_generate_ProjectWithDatabase(t *testing.T) {
 	t.Parallel()
 
 	target := t.TempDir()
-	prj := mustNewProject(t, testName, true)
 
-	files, err := generateProject(prj, target)
+	files, err := generateProject(mustNewProject(t, testName), target)
 	must.NoError(t, err)
 
 	mustHaveFiles(t, target, files,
+		".agents/skills/database/SKILL.md",
+		".docker/migrations.Dockerfile",
+		".docker/migrations.Dockerfile.dockerignore",
+		"server/docker-compose.yml",
+		"server/scripts/migrate.sh",
 		"server/sqlc.yaml",
 		"server/services/item/repository/db/db.go",
 		"server/services/item/repository/db/item-queries.sql.go",
@@ -100,9 +97,31 @@ func Test_generate_ProjectWithSQL(t *testing.T) {
 
 	must.StrContains(t, readFile(t, target, "server/.env"), "postgres://postgres:postgres@localhost:5432/myshop")
 	must.StrContains(t, readFile(t, target, "server/server.go"), "pg.MustOpenConnection")
-	must.StrContains(t, readFile(t, target, "server/Taskfile.yml"), "{{.SQLC_VERSION}}")
-	must.StrContains(t, readFile(t, target, "Taskfile.yml"), "task -d server migrate-up")
 	must.StrContains(t, readFile(t, target, "server/services/item/item-service.go"), "repository.NewItemRepository")
+	must.StrContains(t, readFile(t, target, "server/Taskfile.yml"), "{{.SQLC_VERSION}}")
+	must.StrContains(t, readFile(t, target, "server/Taskfile.yml"), "docker compose run --rm")
+	must.StrContains(t, readFile(t, target, "server/Taskfile.yml"), `ARGS: "redo {{.CLI_ARGS}}"`)
+	must.StrContains(t, readFile(t, target, "Taskfile.yml"), "task -d server migrate-up")
+	must.StrContains(t, readFile(t, target, "Taskfile.yml"), "task -d server migrate-new -- {{.CLI_ARGS}}")
+	must.StrContains(t, readFile(t, target, "Taskfile.yml"),
+		"docker build -f .docker/migrations.Dockerfile -t myshop-migrations .")
+
+	compose := readFile(t, target, "server/docker-compose.yml")
+	must.StrContains(t, compose, "name: myshop\n")
+	must.StrContains(t, compose, "POSTGRES_DB: myshop")
+	must.StrContains(t, compose, "postgres://postgres:postgres@postgres:5432/myshop")
+
+	must.StrContains(t, readFile(t, target, "server/scripts/migrate.sh"), "public.dbmate_migrations_$target")
+	must.StrContains(t, readFile(t, target, ".docker/migrations.Dockerfile"),
+		`ENTRYPOINT ["sh", "/app/scripts/migrate.sh"]`)
+
+	skill := readFile(t, target, ".agents/skills/database/SKILL.md")
+	must.StrContains(t, skill, "name: database")
+	must.StrContains(t, skill, "myshop-migrations")
+
+	for _, file := range []string{"README.md", "Taskfile.yml", "server/Taskfile.yml", "server/.env"} {
+		must.StrNotContains(t, readFile(t, target, file), "<no value>")
+	}
 }
 
 func Test_generate_NoControllerIsScaffolded(t *testing.T) {
@@ -110,7 +129,7 @@ func Test_generate_NoControllerIsScaffolded(t *testing.T) {
 
 	target := t.TempDir()
 
-	files, err := generateProject(mustNewProject(t, testName, true), target)
+	files, err := generateProject(mustNewProject(t, testName), target)
 	must.NoError(t, err)
 
 	for _, file := range files {
@@ -125,7 +144,7 @@ func Test_generate_ImportsFollowTheRepository(t *testing.T) {
 
 	target := t.TempDir()
 
-	prj, err := newProject(testName, "git@gitlab.com:acme/shop.git", "1.25.0", "..", true)
+	prj, err := newProject(testName, "git@gitlab.com:acme/shop.git", "1.25.0", "..")
 	must.NoError(t, err)
 
 	_, err = generateProject(prj, target)
@@ -140,10 +159,10 @@ func Test_generate_ImportsFollowTheRepository(t *testing.T) {
 		`"gitlab.com/acme/shop/server/services/item/repository"`)
 }
 
-func mustNewProject(t *testing.T, name string, withSQL bool) project {
+func mustNewProject(t *testing.T, name string) project {
 	t.Helper()
 
-	prj, err := newProject(name, testRepo, "1.25.0", "", withSQL)
+	prj, err := newProject(name, testRepo, "1.25.0", "")
 	must.NoError(t, err)
 
 	return prj

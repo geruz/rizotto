@@ -21,7 +21,7 @@ installs it first when the project does not have it yet.
 Flags:
 	-providers   comma separated OAuth providers: google, github (default "google")
 
-The project must have been scaffolded with SQL, since the solution owns a table.
+The project must have sqlc.yaml (make-project writes it), since the solution owns a table.
 `
 
 // authProvider is one OAuth provider and the endpoints it is reached at.
@@ -281,35 +281,22 @@ func (o oauthSpec) files() []fileSpec {
 	dir := o.Dir()
 
 	return []fileSpec{
-		{tmpl: "solutions/oauth/client.go.tmpl", out: dir + "/identity-client/client.go", sqlOnly: always},
-		{tmpl: "solutions/oauth/bind-gen.go.tmpl", out: dir + "/identity-client/bind-gen.go", sqlOnly: always},
-		{tmpl: "solutions/oauth/identity-service.go.tmpl", out: dir + "/identity-service.go", sqlOnly: always},
+		{tmpl: "solutions/oauth/client.go.tmpl", out: dir + "/identity-client/client.go"},
+		{tmpl: "solutions/oauth/bind-gen.go.tmpl", out: dir + "/identity-client/bind-gen.go"},
+		{tmpl: "solutions/oauth/identity-service.go.tmpl", out: dir + "/identity-service.go"},
+		{tmpl: "solutions/oauth/repository.go.tmpl", out: dir + "/repository/identity-repository.go"},
+		{tmpl: "solutions/oauth/schema.sql.tmpl", out: dir + "/repository/sql/schema.sql"},
+		{tmpl: "solutions/oauth/queries.sql.tmpl", out: dir + "/repository/sql/identity-queries.sql"},
 		{
-			tmpl:    "solutions/oauth/repository.go.tmpl",
-			out:     dir + "/repository/identity-repository.go",
-			sqlOnly: always,
+			tmpl: "solutions/oauth/migration.sql.tmpl",
+			out:  dir + "/repository/migrations/000001_create_user_identities.sql",
 		},
-		{tmpl: "solutions/oauth/schema.sql.tmpl", out: dir + "/repository/sql/schema.sql", sqlOnly: always},
-		{
-			tmpl:    "solutions/oauth/queries.sql.tmpl",
-			out:     dir + "/repository/sql/identity-queries.sql",
-			sqlOnly: always,
-		},
-		{
-			tmpl:    "solutions/oauth/migration.sql.tmpl",
-			out:     dir + "/repository/migrations/000001_create_user_identities.sql",
-			sqlOnly: always,
-		},
-		{tmpl: "solutions/oauth/db/db.go.tmpl", out: dir + "/repository/db/db.go", sqlOnly: always},
-		{tmpl: "solutions/oauth/db/models.go.tmpl", out: dir + "/repository/db/models.go", sqlOnly: always},
-		{
-			tmpl:    "solutions/oauth/db/queries.sql.go.tmpl",
-			out:     dir + "/repository/db/identity-queries.sql.go",
-			sqlOnly: always,
-		},
-		{tmpl: "solutions/oauth/provider.go.tmpl", out: dir + "/oauth/provider.go", sqlOnly: always},
-		{tmpl: "solutions/oauth/oauth-api.go.tmpl", out: "api/oauth-api/oauth.go", sqlOnly: always},
-		{tmpl: "solutions/oauth/oauth-api_test.go.tmpl", out: "api/oauth-api/oauth_test.go", sqlOnly: always},
+		{tmpl: "solutions/oauth/db/db.go.tmpl", out: dir + "/repository/db/db.go"},
+		{tmpl: "solutions/oauth/db/models.go.tmpl", out: dir + "/repository/db/models.go"},
+		{tmpl: "solutions/oauth/db/queries.sql.go.tmpl", out: dir + "/repository/db/identity-queries.sql.go"},
+		{tmpl: "solutions/oauth/provider.go.tmpl", out: dir + "/oauth/provider.go"},
+		{tmpl: "solutions/oauth/oauth-api.go.tmpl", out: "api/oauth-api/oauth.go"},
+		{tmpl: "solutions/oauth/oauth-api_test.go.tmpl", out: "api/oauth-api/oauth_test.go"},
 	}
 }
 

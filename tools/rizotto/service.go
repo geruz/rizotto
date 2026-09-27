@@ -263,9 +263,9 @@ func (s serviceSpec) files() []fileSpec {
 	dir := s.Dir()
 	files := make([]fileSpec, 0, withRepository)
 	files = append(files,
-		fileSpec{tmpl: "service/service.go.tmpl", out: dir + "/" + s.Lower + "-service.go", sqlOnly: always},
-		fileSpec{tmpl: "service/client.go.tmpl", out: dir + "/" + s.Lower + "-client/client.go", sqlOnly: always},
-		fileSpec{tmpl: "service/bind-gen.go.tmpl", out: dir + "/" + s.Lower + "-client/bind-gen.go", sqlOnly: always},
+		fileSpec{tmpl: "service/service.go.tmpl", out: dir + "/" + s.Lower + "-service.go"},
+		fileSpec{tmpl: "service/client.go.tmpl", out: dir + "/" + s.Lower + "-client/client.go"},
+		fileSpec{tmpl: "service/bind-gen.go.tmpl", out: dir + "/" + s.Lower + "-client/bind-gen.go"},
 	)
 
 	if !s.DB {
@@ -273,29 +273,16 @@ func (s serviceSpec) files() []fileSpec {
 	}
 
 	return append(files,
+		fileSpec{tmpl: "service/repository.go.tmpl", out: dir + "/repository/" + s.Lower + "-repository.go"},
+		fileSpec{tmpl: "service/schema.sql.tmpl", out: dir + "/repository/sql/schema.sql"},
+		fileSpec{tmpl: "service/queries.sql.tmpl", out: dir + "/repository/sql/" + s.Lower + "-queries.sql"},
 		fileSpec{
-			tmpl:    "service/repository.go.tmpl",
-			out:     dir + "/repository/" + s.Lower + "-repository.go",
-			sqlOnly: always,
+			tmpl: "service/migration.sql.tmpl",
+			out:  dir + "/repository/migrations/000001_create_" + s.LowerPlural + ".sql",
 		},
-		fileSpec{tmpl: "service/schema.sql.tmpl", out: dir + "/repository/sql/schema.sql", sqlOnly: always},
-		fileSpec{
-			tmpl:    "service/queries.sql.tmpl",
-			out:     dir + "/repository/sql/" + s.Lower + "-queries.sql",
-			sqlOnly: always,
-		},
-		fileSpec{
-			tmpl:    "service/migration.sql.tmpl",
-			out:     dir + "/repository/migrations/000001_create_" + s.LowerPlural + ".sql",
-			sqlOnly: always,
-		},
-		fileSpec{tmpl: "service/db/db.go.tmpl", out: dir + "/repository/db/db.go", sqlOnly: always},
-		fileSpec{tmpl: "service/db/models.go.tmpl", out: dir + "/repository/db/models.go", sqlOnly: always},
-		fileSpec{
-			tmpl:    "service/db/queries.sql.go.tmpl",
-			out:     dir + "/repository/db/" + s.Lower + "-queries.sql.go",
-			sqlOnly: always,
-		},
+		fileSpec{tmpl: "service/db/db.go.tmpl", out: dir + "/repository/db/db.go"},
+		fileSpec{tmpl: "service/db/models.go.tmpl", out: dir + "/repository/db/models.go"},
+		fileSpec{tmpl: "service/db/queries.sql.go.tmpl", out: dir + "/repository/db/" + s.Lower + "-queries.sql.go"},
 	)
 }
 

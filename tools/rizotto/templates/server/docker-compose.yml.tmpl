@@ -1,0 +1,46 @@
+# The local database of the project and the dbmate that migrates it. Nothing here
+# is used outside a workstation: a real environment gets its migrations from the
+# image built by .docker/migrations.Dockerfile.
+#
+#     task db:start     # PostgreSQL on :5432, the DATABASE_URL of server/.env
+#     task migrate-up   # dbmate on the same network, see scripts/migrate.sh
+#
+# The image is pinned here and in .docker/migrations.Dockerfile (dbmate): bump
+# both together with the image of every other environment.
+name: {{.Slug}}
+
+services:
+    postgres:
+        image: postgres:18.6-alpine
+        environment:
+            POSTGRES_USER: postgres
+            POSTGRES_PASSWORD: postgres
+            POSTGRES_DB: {{.Slug}}
+        ports:
+            - "5432:5432"
+        volumes:
+            # since PostgreSQL 18 the data lives in a versioned directory below
+            # /var/lib/postgresql, so a major upgrade needs "task db:reset"
+            - pgdata:/var/lib/postgresql
+        healthcheck:
+            test: ["CMD-SHELL", "pg_isready -U postgres -d {{.Slug}}"]
+            interval: 2s
+            timeout: 5s
+            retries: 30
+
+    dbmate:
+        image: ghcr.io/amacneil/dbmate:2.36.0
+        # started only by "docker compose run dbmate", never by "up"
+        profiles: [tools]
+        depends_on:
+            postgres:
+                condition: service_healthy
+        environment:
+            DATABASE_URL: postgres://postgres:postgres@postgres:5432/{{.Slug}}?sslmode=disable
+        volumes:
+            - .:/src
+        working_dir: /src
+        entrypoint: ["sh", "scripts/migrate.sh"]
+
+volumes:
+    pgdata:

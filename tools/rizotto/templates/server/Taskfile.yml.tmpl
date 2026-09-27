@@ -1,9 +1,7 @@
 version: "3"
 dotenv: [".env"]
-{{- if .SQL}}
 vars:
     SQLC_VERSION: 1.31.1
-{{- end}}
 tasks:
     deps:
         desc: Resolve go dependencies
@@ -12,8 +10,9 @@ tasks:
         silent: true
 
     start:
-        desc: Run the service
+        desc: Run the service, starting the local PostgreSQL first
         cmds:
+            - task: db:start
             - go run .
         silent: true
 
@@ -32,37 +31,62 @@ tasks:
         silent: true
 
     gen:
-        desc: Regenerate the service bindings{{if .SQL}} and the sqlc queries{{end}}
+        desc: Regenerate the service bindings and the sqlc queries
         cmds:
             - PATH="$(go env GOPATH)/bin:$PATH" go generate ./...
-{{- if .SQL}}
             - docker run --rm --user "$(id -u):$(id -g)" -v "$(pwd):/src" -w /src sqlc/sqlc:{{`{{.SQLC_VERSION}}`}} generate
 
-    migrate-up:
-        desc: Apply the migrations of every service
+    # The db:* and migrate-* tasks act on the PostgreSQL of docker-compose.yml only,
+    # whatever DATABASE_URL says: a real environment is migrated by the image of
+    # .docker/migrations.Dockerfile. scripts/migrate.sh describes the commands.
+    db:start:
+        desc: Start the local PostgreSQL on :5432
         cmds:
-            - task: migrate
-              vars: { COMMAND: migrate }
+            - docker compose up --detach --wait postgres
+
+    db:stop:
+        desc: Stop the local PostgreSQL, keeping its data
+        cmds:
+            - docker compose stop postgres
+
+    db:reset:
+        desc: Delete the local PostgreSQL together with its data; migrate-up creates it again
+        prompt: This deletes every row of the local database. Continue?
+        cmds:
+            - docker compose down --volumes
+
+    migrate-up:
+        desc: Apply the pending migrations of every service to the local PostgreSQL
+        cmds:
+            - task: dbmate
+              vars: { ARGS: up }
+
+    migrate-status:
+        desc: List the applied and the pending migrations of every service
+        cmds:
+            - task: dbmate
+              vars: { ARGS: status }
 
     migrate-down:
-        desc: Roll back the last migration of every service
+        desc: "Roll back the last migration of one service: task migrate-down -- item"
         cmds:
-            - task: migrate
-              vars: { COMMAND: rollback }
+            - task: dbmate
+              vars: { ARGS: "down {{`{{.CLI_ARGS}}`}}" }
 
-    migrate:
-        internal: true
-        desc: Run dbmate over the migrations of every service
+    migrate-redo:
+        desc: "Roll back the last migration of one service and apply it again: task migrate-redo -- item"
         cmds:
-            - |
-                set -e
-                for dir in services/*/repository/migrations; do
-                    [ -d "$dir" ] || continue
-                    service=$(basename "$(dirname "$(dirname "$dir")")")
-                    echo "dbmate {{`{{.COMMAND}}`}} $service"
-                    dbmate -u "${OWNER_DATABASE_URL:-$DATABASE_URL}" \
-                        --migrations-dir "$dir" \
-                        --migrations-table "public.dbmate_migrations_${service}" \
-                        --no-dump-schema --wait {{`{{.COMMAND}}`}}
-                done
-{{- end}}
+            - task: dbmate
+              vars: { ARGS: "redo {{`{{.CLI_ARGS}}`}}" }
+
+    migrate-new:
+        desc: "Create a migration: task migrate-new -- item add_price_to_items"
+        cmds:
+            - task: dbmate
+              vars: { ARGS: "new {{`{{.CLI_ARGS}}`}}" }
+
+    dbmate:
+        internal: true
+        cmds:
+            # --user keeps the files dbmate creates owned by you rather than root
+            - docker compose run --rm --user "$(id -u):$(id -g)" dbmate {{`{{.ARGS}}`}}

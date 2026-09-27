@@ -183,7 +183,8 @@ nesting.
 
 Every change is two edits that must agree:
 
-1. a new file in `repository/migrations/`, applied by `task migrate-up`;
+1. a new file in `repository/migrations/`, created by
+   `task migrate-new -- <service> <name>` and applied by `task migrate-up`;
 2. the matching change in `repository/sql/schema.sql`, which is what sqlc reads.
 
 Editing only the migration leaves sqlc type-checking against the old shape;
@@ -192,18 +193,23 @@ have. Migrations are `dbmate` files with both directions:
 
 ```sql
 -- migrate:up
-ALTER TABLE public.orders ADD COLUMN total BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS total BIGINT NOT NULL DEFAULT 0;
 
 -- migrate:down
-ALTER TABLE public.orders DROP COLUMN total;
+ALTER TABLE public.orders DROP COLUMN IF EXISTS total;
 ```
 
-`task migrate-up` walks `services/*/repository/migrations` and runs dbmate per
+`scripts/migrate.sh` walks `services/*/repository/migrations` and runs dbmate per
 service against its own `public.dbmate_migrations_<service>` table, so services
 do not share migration state. A new service is picked up by the glob with no
-Taskfile edit.
+edit. The `migrate-*` tasks run it in docker against the local PostgreSQL of
+`docker-compose.yml`; a deploy runs it from the image of
+`.docker/migrations.Dockerfile`.
 
-Never edit a migration that has been applied anywhere — add a new one.
+Never edit a migration that has been applied anywhere — add a new one. What a
+migration may do while the previous release is still running, and how to remove
+a column, is in `.agents/skills/database/SKILL.md` at the project root: read it
+before the first migration of a change.
 
 ## Checklist for a new table
 
@@ -211,4 +217,5 @@ Never edit a migration that has been applied anywhere — add a new one.
 - `created_at` / `updated_at` as `TIMESTAMP NOT NULL DEFAULT NOW()`
 - an index for every ordering a listing uses, tiebroken by `id`
 - the same DDL in both the migration and `repository/sql/schema.sql`
-- `task gen`, then `task migrate-up`
+- `task gen`, then `task migrate-up`, then `task migrate-redo -- <service>` to
+  prove the `down`

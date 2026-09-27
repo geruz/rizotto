@@ -1,0 +1,21 @@
+# The image that migrates a database: dbmate with the migrations of every service,
+# applied by server/scripts/migrate.sh. A deploy runs it to completion before the
+# new server starts, with the database in DATABASE_URL (or OWNER_DATABASE_URL,
+# when migrations need a role the server does not have). Build it from the
+# project root:
+#
+#     task docker:build:migrations
+#     docker run --rm -e DATABASE_URL=postgres://... {{.Slug}}-migrations
+#
+# It only ever runs "up": deploying an older release does not roll the schema
+# back, so the older server meets the newer schema.
+#
+# dbmate is pinned here and in server/docker-compose.yml: bump both together.
+
+FROM ghcr.io/amacneil/dbmate:2.36.0
+WORKDIR /app
+COPY server/scripts/migrate.sh ./scripts/migrate.sh
+# migrations.Dockerfile.dockerignore lets only the migrations through
+COPY server/services ./services
+ENTRYPOINT ["sh", "/app/scripts/migrate.sh"]
+CMD ["up"]

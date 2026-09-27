@@ -34,6 +34,11 @@ rizotto repository skill   # before writing a query, a migration or a column
 rizotto solution skill     # before building a feature that may already exist
 ```
 
+Changing the schema — a migration, a new or retired column — also follows the
+`database` skill of this repository (`.agents/skills/database/SKILL.md`): which
+task touches which database, and what a migration may do while the previous
+release is still running.
+
 ## Step 3 — check whether the feature already exists
 
 Some features are not worth designing again. Before building one by hand:
@@ -62,8 +67,9 @@ session, so every answer must be supplied upfront:
    version.
 2. Fill in every flag.
 3. Any answer you do not know — project name, target directory, git repo,
-   whether SQL is needed, which CRUD methods, which routes, whether routes
-   need authentication — is a decision for the user, not a default to invent.
+   whether a service owns a table, which CRUD methods, which routes, whether
+   routes need authentication — is a decision for the user, not a default to
+   invent.
    Ask them, then run the command once with the complete flag set.
 
 Prefer one fully-specified invocation over a retry loop.

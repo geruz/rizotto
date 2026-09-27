@@ -24,7 +24,7 @@ Flags:
 	-download    how a download is handed over: "redirect" (302 to the storage) or
 	             "url" (the link in the json answer) (default "redirect")
 
-The project must have been scaffolded with SQL, since the solution owns a table.
+The project must have sqlc.yaml (make-project writes it), since the solution owns a table.
 `
 
 const (
@@ -161,28 +161,20 @@ func (f filesSpec) files() []fileSpec {
 	dir := f.Dir()
 
 	return []fileSpec{
-		{tmpl: "solutions/files/client.go.tmpl", out: dir + "/file-client/client.go", sqlOnly: always},
-		{tmpl: "solutions/files/bind-gen.go.tmpl", out: dir + "/file-client/bind-gen.go", sqlOnly: always},
-		{tmpl: "solutions/files/file-service.go.tmpl", out: dir + "/file-service.go", sqlOnly: always},
-		{tmpl: "solutions/files/storage.go.tmpl", out: dir + "/storage/s3.go", sqlOnly: always},
-		{tmpl: "solutions/files/storage_test.go.tmpl", out: dir + "/storage/s3_test.go", sqlOnly: always},
-		{tmpl: "solutions/files/repository.go.tmpl", out: dir + "/repository/file-repository.go", sqlOnly: always},
-		{tmpl: "solutions/files/schema.sql.tmpl", out: dir + "/repository/sql/schema.sql", sqlOnly: always},
-		{tmpl: "solutions/files/queries.sql.tmpl", out: dir + "/repository/sql/file-queries.sql", sqlOnly: always},
-		{
-			tmpl:    "solutions/files/migration.sql.tmpl",
-			out:     dir + "/repository/migrations/000001_create_files.sql",
-			sqlOnly: always,
-		},
-		{tmpl: "solutions/files/db/db.go.tmpl", out: dir + "/repository/db/db.go", sqlOnly: always},
-		{tmpl: "solutions/files/db/models.go.tmpl", out: dir + "/repository/db/models.go", sqlOnly: always},
-		{
-			tmpl:    "solutions/files/db/queries.sql.go.tmpl",
-			out:     dir + "/repository/db/file-queries.sql.go",
-			sqlOnly: always,
-		},
-		{tmpl: "solutions/files/file-api.go.tmpl", out: "api/file-api/file.go", sqlOnly: always},
-		{tmpl: "solutions/files/file-api_test.go.tmpl", out: "api/file-api/file_test.go", sqlOnly: always},
+		{tmpl: "solutions/files/client.go.tmpl", out: dir + "/file-client/client.go"},
+		{tmpl: "solutions/files/bind-gen.go.tmpl", out: dir + "/file-client/bind-gen.go"},
+		{tmpl: "solutions/files/file-service.go.tmpl", out: dir + "/file-service.go"},
+		{tmpl: "solutions/files/storage.go.tmpl", out: dir + "/storage/s3.go"},
+		{tmpl: "solutions/files/storage_test.go.tmpl", out: dir + "/storage/s3_test.go"},
+		{tmpl: "solutions/files/repository.go.tmpl", out: dir + "/repository/file-repository.go"},
+		{tmpl: "solutions/files/schema.sql.tmpl", out: dir + "/repository/sql/schema.sql"},
+		{tmpl: "solutions/files/queries.sql.tmpl", out: dir + "/repository/sql/file-queries.sql"},
+		{tmpl: "solutions/files/migration.sql.tmpl", out: dir + "/repository/migrations/000001_create_files.sql"},
+		{tmpl: "solutions/files/db/db.go.tmpl", out: dir + "/repository/db/db.go"},
+		{tmpl: "solutions/files/db/models.go.tmpl", out: dir + "/repository/db/models.go"},
+		{tmpl: "solutions/files/db/queries.sql.go.tmpl", out: dir + "/repository/db/file-queries.sql.go"},
+		{tmpl: "solutions/files/file-api.go.tmpl", out: "api/file-api/file.go"},
+		{tmpl: "solutions/files/file-api_test.go.tmpl", out: "api/file-api/file_test.go"},
 	}
 }
 

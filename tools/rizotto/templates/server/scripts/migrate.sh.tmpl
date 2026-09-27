@@ -1,0 +1,76 @@
+#!/bin/sh
+# Runs dbmate over the migrations of every service. A service keeps its migrations
+# in services/<service>/repository/migrations and its history in its own table,
+# public.dbmate_migrations_<service>, so services never share migration state and
+# a new service is picked up with no edit here.
+#
+# The same script runs locally, inside "docker compose run dbmate" (the migrate-*
+# tasks), and in a deploy, as the entrypoint of .docker/migrations.Dockerfile.
+#
+#     migrate.sh up                    apply the pending migrations of every service
+#     migrate.sh status                list the applied and the pending ones
+#     migrate.sh down <service>        roll back the last migration of one service
+#     migrate.sh redo <service>        roll it back and apply it again
+#     migrate.sh new <service> <name>  create a migration of one service
+#
+# The database is OWNER_DATABASE_URL when it is set, DATABASE_URL otherwise.
+set -eu
+
+cd "$(dirname "$0")/.."
+
+fail() {
+    echo "migrate.sh: $*" >&2
+    exit 2
+}
+
+migrations_dir() {
+    [ -d "services/$1" ] || fail "there is no service $1 in services/"
+    echo "services/$1/repository/migrations"
+}
+
+# run_dbmate <service> <dbmate command...>
+run_dbmate() {
+    target=$1
+    shift
+    dbmate --url "${OWNER_DATABASE_URL:-${DATABASE_URL:?DATABASE_URL is not set}}" \
+        --migrations-dir "services/$target/repository/migrations" \
+        --migrations-table "public.dbmate_migrations_$target" \
+        --no-dump-schema --wait "$@"
+}
+
+# every_service <dbmate command...>
+every_service() {
+    for dir in services/*/repository/migrations; do
+        [ -d "$dir" ] || continue
+        service=$(basename "$(dirname "$(dirname "$dir")")")
+        echo "== $service"
+        run_dbmate "$service" "$@"
+    done
+}
+
+command=${1:-}
+
+case $command in
+up)
+    every_service migrate
+    ;;
+status)
+    every_service status
+    ;;
+down | redo)
+    [ $# -eq 2 ] || fail "usage: migrate.sh $command <service>"
+    migrations_dir "$2" >/dev/null
+    run_dbmate "$2" rollback
+    if [ "$command" = redo ]; then
+        run_dbmate "$2" migrate
+    fi
+    ;;
+new)
+    [ $# -eq 3 ] || fail "usage: migrate.sh new <service> <name>"
+    dir=$(migrations_dir "$2")
+    dbmate --migrations-dir "$dir" new "$3"
+    ;;
+*)
+    fail "usage: migrate.sh up | status | down <service> | redo <service> | new <service> <name>"
+    ;;
+esac

@@ -17,7 +17,6 @@ const (
 	nameFlag       = "-name"
 	pathFlag       = "-path"
 	repoFlag       = "-repo"
-	sqlFlag        = "-sql"
 	invalidName    = "my-shop"
 	// bareWord is a valid project name but not a valid repository.
 	bareWord = "shop"
@@ -28,7 +27,7 @@ func Test_runMakeProject_AsksEveryStep(t *testing.T) {
 
 	root := t.TempDir()
 	out := &bytes.Buffer{}
-	answers := strings.Join([]string{testName, root, "git@github.com:acme/shop.git", "y", ""}, "\n")
+	answers := strings.Join([]string{testName, root, "git@github.com:acme/shop.git", ""}, "\n")
 
 	err := runMakeProject([]string{skipTidyFlag, skipSkillsFlag}, strings.NewReader(answers), out)
 	must.NoError(t, err)
@@ -37,8 +36,9 @@ func Test_runMakeProject_AsksEveryStep(t *testing.T) {
 	must.StrContains(t, printed, "Project name")
 	must.StrContains(t, printed, "Directory to create the project in [.]")
 	must.StrContains(t, printed, "Git repository")
-	must.StrContains(t, printed, "Does the project need SQL")
-	must.StrContains(t, printed, `Created project "MyShop" (with SQL)`)
+	must.StrNotContains(t, printed, "Does the project need SQL")
+	must.StrContains(t, printed, `Created project "MyShop" in`)
+	must.StrContains(t, printed, "task migrate-up")
 
 	must.FileExists(t, filepath.Join(root, "MyShop", "server", "server.go"))
 	must.FileExists(t, filepath.Join(root, "MyShop", "server", "sqlc.yaml"))
@@ -50,7 +50,7 @@ func Test_runMakeProject_RepeatsAWrongAnswer(t *testing.T) {
 
 	root := t.TempDir()
 	out := &bytes.Buffer{}
-	answers := strings.Join([]string{invalidName, "МагазинЪ", testName, root, bareWord, testRepo, "n", ""}, "\n")
+	answers := strings.Join([]string{invalidName, "МагазинЪ", testName, root, bareWord, testRepo, ""}, "\n")
 
 	err := runMakeProject([]string{skipTidyFlag, skipSkillsFlag}, strings.NewReader(answers), out)
 	must.NoError(t, err)
@@ -58,7 +58,7 @@ func Test_runMakeProject_RepeatsAWrongAnswer(t *testing.T) {
 	printed := out.String()
 	must.StrContains(t, printed, "english letters and digits")
 	must.StrContains(t, printed, "expected a repository like github.com/acme/shop")
-	must.StrContains(t, printed, `Created project "MyShop" (without SQL)`)
+	must.StrContains(t, printed, `Created project "MyShop" in`)
 	must.FileExists(t, filepath.Join(root, "MyShop", "server", "server.go"))
 }
 
@@ -67,7 +67,7 @@ func Test_runMakeProject_FlagsSkipTheQuestions(t *testing.T) {
 
 	root := t.TempDir()
 	out := &bytes.Buffer{}
-	args := []string{nameFlag, testName, pathFlag, root, repoFlag, testRepo, sqlFlag, "no", skipTidyFlag, skipSkillsFlag}
+	args := []string{nameFlag, testName, pathFlag, root, repoFlag, testRepo, skipTidyFlag, skipSkillsFlag}
 
 	err := runMakeProject(args, strings.NewReader(""), out)
 	must.NoError(t, err)
@@ -89,7 +89,7 @@ func Test_runMakeProject_InitialisesGit(t *testing.T) {
 
 	root := t.TempDir()
 	out := &bytes.Buffer{}
-	args := []string{nameFlag, testName, pathFlag, root, repoFlag, testRepo, sqlFlag, "no", skipTidyFlag, skipSkillsFlag}
+	args := []string{nameFlag, testName, pathFlag, root, repoFlag, testRepo, skipTidyFlag, skipSkillsFlag}
 
 	err = runMakeProject(args, strings.NewReader(""), out)
 	must.NoError(t, err)
@@ -97,7 +97,7 @@ func Test_runMakeProject_InitialisesGit(t *testing.T) {
 
 	other := t.TempDir()
 	args = []string{
-		nameFlag, testName, pathFlag, other, repoFlag, testRepo, sqlFlag, "no", skipTidyFlag, skipSkillsFlag, "-skip-git",
+		nameFlag, testName, pathFlag, other, repoFlag, testRepo, skipTidyFlag, skipSkillsFlag, "-skip-git",
 	}
 
 	err = runMakeProject(args, strings.NewReader(""), out)
@@ -124,7 +124,7 @@ func Test_runMakeProject_SurvivesAFailedSkillsInstall(t *testing.T) {
 
 			root := t.TempDir()
 			out := &bytes.Buffer{}
-			args := []string{nameFlag, testName, pathFlag, root, repoFlag, testRepo, sqlFlag, "no", skipTidyFlag}
+			args := []string{nameFlag, testName, pathFlag, root, repoFlag, testRepo, skipTidyFlag}
 
 			err := runMakeProject(args, strings.NewReader(""), out)
 			must.NoError(t, err)
@@ -141,11 +141,11 @@ func Test_runMakeProject_RejectsBadInput(t *testing.T) {
 	root := t.TempDir()
 
 	cases := map[string][]string{
-		caseInvalidName:      {nameFlag, invalidName, pathFlag, root, repoFlag, testRepo, sqlFlag, "no"},
-		"invalid repo":       {nameFlag, testName, pathFlag, root, repoFlag, bareWord, sqlFlag, "no"},
-		"invalid sql answer": {nameFlag, testName, pathFlag, root, repoFlag, testRepo, sqlFlag, "maybe"},
-		casePositional:       {testName, root},
-		"unknown flag":       {"-what", "ever"},
+		caseInvalidName:    {nameFlag, invalidName, pathFlag, root, repoFlag, testRepo},
+		"invalid repo":     {nameFlag, testName, pathFlag, root, repoFlag, bareWord},
+		"removed sql flag": {nameFlag, testName, pathFlag, root, repoFlag, testRepo, "-sql", "no"},
+		casePositional:     {testName, root},
+		"unknown flag":     {"-what", "ever"},
 	}
 
 	for name, args := range cases {

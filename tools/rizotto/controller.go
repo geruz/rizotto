@@ -252,8 +252,8 @@ func (c controllerSpec) files() []fileSpec {
 	dir := c.Dir()
 
 	return []fileSpec{
-		{tmpl: "controller/controller.go.tmpl", out: dir + "/" + c.Lower + ".go", sqlOnly: always},
-		{tmpl: "controller/controller_test.go.tmpl", out: dir + "/" + c.Lower + "_test.go", sqlOnly: always},
+		{tmpl: "controller/controller.go.tmpl", out: dir + "/" + c.Lower + ".go"},
+		{tmpl: "controller/controller_test.go.tmpl", out: dir + "/" + c.Lower + "_test.go"},
 	}
 }
 

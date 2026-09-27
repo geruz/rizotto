@@ -5,9 +5,7 @@ import (
 
 	"{{.RizottoModule}}"
 	"{{.RizottoModule}}/gateway"
-{{- if .SQL}}
 	"{{.RizottoModule}}/pg"
-{{- end}}
 	"{{.RizottoModule}}/settings/env"
 
 	itemsrv "{{.Module}}/services/item"
@@ -34,17 +32,13 @@ func main() {
 	if staticDir != "" {
 		gt = gt.Static("/", staticDir)
 	}
-{{if .SQL}}
+
 	pgPool := pg.MustOpenConnection(ctx, env.MustGetStringValue("DATABASE_URL"))
 
 	item.RegisterServer(
 		itemsrv.NewItemService(pgPool),
 	)
-{{else}}
-	item.RegisterServer(
-		itemsrv.NewItemService(),
-	)
-{{end}}
+
 	err := gt.Routing(
 		gateway.JoinRouteTables(
 		// add the route tables of the controllers here:

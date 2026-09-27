@@ -106,7 +106,8 @@ type projectInfo struct {
 	Root string
 	// Module is the go module path, which every generated import follows.
 	Module string
-	// SQL tells whether the project was scaffolded with database support.
+	// SQL tells whether the project has sqlc.yaml. make-project always writes
+	// it, but a project may have lost it or predate that.
 	SQL bool
 	// Services are the services already present.
 	Services []serviceInfo
@@ -119,7 +120,7 @@ var (
 	errWrongFlags       = errors.New("the solution was handed the flags of another one")
 	errSolutionNeedsSQL = errors.New(
 		"this solution owns database tables, but the project has no sqlc.yaml; " +
-			"scaffold the project with -sql yes")
+			"projects made by make-project have one, restore it or add a service with -db yes first")
 	errSolutionConflict = errors.New("the solution would overwrite existing files, pass -force to write them anyway")
 	errSolutionCycle    = errors.New("the solutions require each other in a circle")
 )

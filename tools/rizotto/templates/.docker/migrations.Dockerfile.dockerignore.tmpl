@@ -1,0 +1,5 @@
+# Read by docker next to .docker/migrations.Dockerfile: the image needs the
+# migrations and the script running them, nothing else.
+*
+!server/scripts/migrate.sh
+!server/services/*/repository/migrations

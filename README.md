@@ -7,8 +7,8 @@
 
 ### rizotto make-project
 
-Scaffolds a new project with the layout of [example](example), asking for everything
-it needs step by step:
+Scaffolds a new project with the layout of [example](example) and PostgreSQL, asking
+for everything it needs step by step:
 
 ```sh
 task make-project
@@ -20,7 +20,6 @@ go install ./tools/rizotto && rizotto make-project
 Project name (english letters and digits, e.g. MyShop): MyShop
 Directory to create the project in [.]: ~/projects
 Git repository (github.com/acme/shop): git@github.com:acme/shop.git
-Does the project need SQL (PostgreSQL + sqlc + dbmate)? [y/N]: y
 ```
 
 1. **Name** — english letters and digits only, so that it can be used as an
@@ -30,8 +29,12 @@ Does the project need SQL (PostgreSQL + sqlc + dbmate)? [y/N]: y
    `https://github.com/acme/shop.git` or `git@github.com:acme/shop.git`. The
    repository followed by `/server` becomes the go module path
    (`github.com/acme/shop/server`), so every import inside the project follows it.
-4. **SQL** — answering yes adds the repository layer with sqlc queries and dbmate
-   migrations.
+
+The project always works with PostgreSQL: the sample `item` service owns a table,
+`server/docker-compose.yml` runs the local database and dbmate, the `migrate-*` tasks
+apply the migrations of every service, and `.docker/migrations.Dockerfile` builds the
+image a deploy runs to migrate a real database. `.agents/skills/database/SKILL.md`
+tells a coding agent how to change the schema safely.
 
 Every answer can be given upfront as a flag, and the matching question is then
 skipped:
@@ -41,7 +44,6 @@ skipped:
 | `-name`         | project name                                                              |
 | `-path`         | directory the project folder is created in                                |
 | `-repo`         | git repository, becomes the go module path                                |
-| `-sql`          | `yes` or `no`                                                             |
 | `-rizotto-path` | path to a local rizotto checkout; adds a `replace` directive to `go.mod`  |
 | `-go-version`   | `go` directive of the generated `go.mod` (default: the running toolchain) |
 | `-force`        | generate into an existing non-empty directory                             |

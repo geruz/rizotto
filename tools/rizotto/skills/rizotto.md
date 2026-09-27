@@ -13,7 +13,7 @@ OpenAPI documentation) comes from the framework packages.
 
 ## Commands
 
-    rizotto make-project        create a new project (name, directory, git repository, SQL)
+    rizotto make-project        create a new project with PostgreSQL (name, directory, git repository)
     rizotto service add         add a service (database, CRUD methods)
     rizotto controller add      add an HTTP controller for one of the services
     rizotto solution list       features that can be installed whole: user, oauth, files
@@ -29,9 +29,11 @@ storage in particular are solutions, not something to assemble out of
 
 ## Project layout
 
-    Taskfile.yml                    forwards to server/ and web/: deps | start | test | lint | gen | migrate-up | web:dev | web:build | docker:build
+    Taskfile.yml                    forwards to server/ and web/: deps | start | test | lint | gen | db:* | migrate-* | web:* | docker:*
     .agents/skills/rizotto/         the agent skill pointing back at these commands
-    .docker/                        Dockerfile (web and server in one image), its .dockerignore, the image .env
+    .agents/skills/database/        the agent skill for changing the schema: tasks, migrations, rollout
+    .docker/                        Dockerfile (web and server in one image), migrations.Dockerfile (dbmate
+                                    with every migration, run by a deploy), their .dockerignore, the image .env
     server/                         the go module, <repository>/server
     web/                            the React app: Vite, TypeScript, Tailwind and shadcn/ui
 
@@ -41,6 +43,8 @@ Inside `server/`:
     .env / .env.example             configuration, .env imports .env.example; STATIC_DIR serves a web build from /
     Taskfile.yml                    the server tasks, run in server/
     sqlc.yaml                       one entry per service that owns a table
+    docker-compose.yml              the local PostgreSQL on :5432 and the dbmate that migrates it
+    scripts/migrate.sh              runs dbmate over services/*/repository/migrations
     api/controller.go               HTTP contexts shared by the controllers
     api/doc/                        the OpenAPI document the route tests fill in
     api/<name>-api/                 one controller: routes, DTOs, route tests
@@ -77,7 +81,7 @@ func main() {
 
     gt := gateway.NewHTTPGateway()
 
-    pgPool := pg.MustOpenConnection(ctx, env.MustGetStringValue("DATABASE_URL")) // only with SQL
+    pgPool := pg.MustOpenConnection(ctx, env.MustGetStringValue("DATABASE_URL"))
 
     order.RegisterServer(ordersrv.NewOrderService(pgPool)) // one line per service
 
@@ -129,15 +133,24 @@ from the standard `OTEL_EXPORTER_OTLP_*` variables.
 Run from the repository root:
 
     task deps          go mod tidy and npm install
-    task start         go run . in server/
+    task start         starts the local PostgreSQL, then go run . in server/
     task web:dev       the React app on :5173, /api proxied to the server
     task web:build     the static build into web/dist
     task docker:build  the docker image: the server serving the web build from /
+    task docker:build:migrations  the image a deploy runs to migrate $DATABASE_URL
     task test          go test ./... with coverage; refreshes every openapi.yml
     task lint          golangci-lint run ./...
     task gen           regenerate bind-gen.go (genbind) and the sqlc queries (docker)
-    task migrate-up    apply the dbmate migrations of every service
-    task migrate-down  roll the last migration of every service back
+    task db:start / db:stop / db:reset   the local PostgreSQL of server/docker-compose.yml
+    task migrate-up                      apply the pending migrations of every service
+    task migrate-new -- <service> <name> create a migration of one service
+    task migrate-redo -- <service>       roll the last migration of one service back and apply it again
+    task migrate-down -- <service>       roll the last migration of one service back
+    task migrate-status                  applied and pending migrations of every service
+
+The db:* and migrate-* tasks act on the local PostgreSQL only, in docker; a real
+environment is migrated by the migrations image during the deploy. Read
+`.agents/skills/database/SKILL.md` before writing a migration.
 
 `task gen` needs the `genbind` binary: `go install github.com/geruz/rizotto/tools/genbind@latest`.
 

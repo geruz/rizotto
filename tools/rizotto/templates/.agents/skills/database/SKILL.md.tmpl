@@ -1,0 +1,252 @@
+---
+name: database
+description: >
+  Use when changing the database schema of this project or anything that builds
+  it: writing, applying or rolling back a dbmate migration in
+  server/services/<service>/repository/migrations, keeping repository/sql/schema.sql
+  in step with it, starting or resetting the local PostgreSQL, running the
+  migrations image against a real database, bumping the pinned PostgreSQL or dbmate
+  image, or deciding what a migration may do given that the previous release keeps
+  running against the new schema. Also retiring a column, an enum value, a table or
+  a view: the two-release order, what sqlc and the compiler cannot see, and the
+  enum-value procedure. Maps every file and task and says which ones touch a real
+  database. Read it before writing the first migration of a change.
+---
+
+# Working with the database
+
+The schema is a function of files in git: the migrations of every service,
+applied in order. The local database, the generated `repository/db/` packages and
+every real environment are derived from those files. Nobody changes a database by
+hand, and nobody edits a generated file.
+
+All paths below are relative to `server/`. All tasks run from the repository root
+(or from `server/`, which has the same tasks).
+
+For the column conventions (`BIGSERIAL`, `TIMESTAMP` in UTC), the query style and
+the transaction helpers, run `rizotto repository skill`. This skill is about the
+schema's lifecycle, not the SQL style.
+
+## The map
+
+| Path | What it is | Who writes it |
+|---|---|---|
+| `services/<service>/repository/migrations/<version>_<name>.sql` | dbmate migrations, `-- migrate:up` / `-- migrate:down`. The history of the service's tables | you, starting from `task migrate-new` |
+| `services/<service>/repository/sql/schema.sql` | The shape of the service's tables as sqlc should see it. The only schema sqlc reads | you, by hand, in step with the migrations |
+| `services/<service>/repository/sql/<service>-queries.sql` | The annotated queries | you |
+| `services/<service>/repository/db/` | sqlc output. Committed; never edited | `task gen` |
+| `sqlc.yaml` | One entry per repository: its queries, its schema, its output | `rizotto service add` / `solution add` |
+| `scripts/migrate.sh` | Runs dbmate over the migrations of every service, each with its own history table `public.dbmate_migrations_<service>` | by hand, rarely |
+| `docker-compose.yml` | The local PostgreSQL (pinned image) and the dbmate that migrates it | by hand |
+| `../.docker/migrations.Dockerfile` | The image a deploy runs: dbmate, `scripts/migrate.sh` and every migration, `up` only | by hand, rarely |
+
+Every service owns its tables and its migration history. A migration never touches
+the tables of another service, and a column pointing at another service's table
+carries no foreign key: that would tie two histories into one order.
+
+## Which tasks touch what
+
+Safe — the local PostgreSQL of `docker-compose.yml` only, whatever `DATABASE_URL`
+in `.env` says:
+
+- `task db:start` / `task db:stop` — start or stop the container `{{.Slug}}-postgres-1` on :5432.
+- `task migrate-up` — apply the pending migrations of every service. Starts the container when needed.
+- `task migrate-status` — the applied and the pending migrations of every service.
+- `task migrate-down -- <service>` — roll back the last migration of one service.
+- `task migrate-redo -- <service>` — roll it back and apply it again: the loop while you iterate on the SQL.
+- `task migrate-new -- <service> <name>` — create the file. Touches no database.
+- `task db:reset` — **destructive for the local database only**: deletes the container with its volume. `task migrate-up` builds it again from the migrations.
+
+Ask first — these act on whatever database you point them at, which can be a real
+environment:
+
+- `docker run --rm -e DATABASE_URL=... {{.Slug}}-migrations` (built by `task docker:build:migrations`).
+- `scripts/migrate.sh` run by hand with a `DATABASE_URL` in the environment.
+
+Real environments get migrations only through the deploy — the migrations image,
+run to completion before the new server starts — never from a workstation.
+
+## Writing a migration
+
+1. **Create the file:** `task migrate-new -- <service> add_foo_to_bars`. dbmate names
+   it with a UTC timestamp. Never pick a version by hand.
+2. **Write both halves.** Additions are idempotent: `add column if not exists`,
+   `create table if not exists`, `create index if not exists`. The down undoes
+   exactly the up.
+3. **Apply it locally:** `task migrate-up`. While iterating on the SQL: edit, then
+   `task migrate-redo -- <service>`. That also proves the `down` works.
+4. **Make `repository/sql/schema.sql` say the same thing.** It is written by hand, so
+   nothing checks that it agrees with the migrations: read the two side by side.
+   A column only in the migration is invisible to sqlc; a column only in
+   `schema.sql` generates code for something the database does not have.
+5. **Regenerate and build:** `task gen`, then `task test` (which builds everything).
+   sqlc expands `SELECT *` and `RETURNING *` into the column list at generation
+   time, so a new column reaches the generated structs only through `task gen`.
+6. **Commit the migration, `schema.sql` and the regenerated `db/` together.**
+
+Documenting a table or column: put `comment on …` in the migration, where the next
+reader of the history finds it.
+
+### Versions and branches
+
+Versions are timestamps, so two branches rarely take the same one — but they do
+interleave. dbmate applies every migration it has not recorded, including one
+older than the newest applied, **silently**: a migration merged from a long-lived
+branch runs after migrations that are newer than it on paper. So:
+
+- Before merging, rebase and make sure your migration still makes sense after
+  everything that landed before it. If it depends on a newer migration, recreate it
+  with `task migrate-new` so that it sorts after.
+- If your local database applied a migration of another branch, roll it back
+  (`task migrate-down -- <service>`) before switching, or `task db:reset` and
+  `task migrate-up`. `task migrate-status` shows a version applied locally that has
+  no file on the current branch.
+
+### Data in a migration
+
+- Small, fixed reference rows the schema needs (`insert … on conflict do nothing`)
+  belong in the migration.
+- A bulk backfill or rewrite does not: the deploy waits for the migrations image,
+  and the new server does not start until it finishes. Backfill in batches from a
+  one-off job run after the deploy, and let the code cope with rows not yet
+  backfilled.
+- dbmate wraps each migration in a transaction. `create index concurrently` cannot
+  run in one: put it in its own migration with `-- migrate:up transaction:false`
+  (and the same on `-- migrate:down`).
+- `alter type … add value` is allowed in a transaction, but the new value cannot be
+  used in that same transaction — do not insert rows with it in the migration that
+  adds it.
+
+## What a migration may do: the rollout
+
+The deploy runs the migrations image **before** the new server replaces the old
+one, and while the rollout mixes them, old and new servers serve the one migrated
+database. So:
+
+- **The old code must keep working against the new schema.** Adding a nullable
+  column, a column with a default, a table, an index, an enum value — fine.
+  Renaming a column or table, changing a type, adding `NOT NULL` without a default —
+  breaks the old servers mid-rollout. Do those as expand → deploy → switch code →
+  deploy → contract.
+- **Rollback does not run `down`.** The image only ever runs `up`, so deploying an
+  older release leaves the newer schema in place and the older code meets it.
+  Migrated data must stay usable by both versions. `down` exists for local
+  iteration and hand-run recovery, not for deploys.
+- **The `down` for an added enum value** rebuilds the type, since PostgreSQL has no
+  `drop value`: refuse while any row still holds the value (`raise exception` —
+  such rows are moved by hand before the rollback), then rename the type, create it
+  without the value, `alter column … type … using …::text::…` with the column
+  default dropped and restored around it, drop the old type.
+- **Removing anything** — a column, an enum value, a table, a view — is never a
+  single migration. It is two releases, in the order of the next section.
+
+## Removing a column, an enum value, a table or a view
+
+The code stops using the object in one release; the migration that drops it ships
+in a later one. `schema.sql` is what makes the first half checkable: it is the only
+schema sqlc reads, and it may run ahead of the database in exactly one direction —
+missing something the database still has.
+
+### The order
+
+Steps 3 and 4 in the other order find nothing.
+
+1. **If the column is `NOT NULL` with no default, loosen it first** — an ordinary
+   migration that drops the `NOT NULL` or gives the column a default, deployed on
+   its own. Code generated without the column cannot insert into a table that
+   still demands it.
+2. **Remove the object from `repository/sql/schema.sql` only.** No migration yet.
+3. **`task gen`.** A query naming the column fails generation. A `select *` or
+   `returning *` does not: sqlc expands the star without the column, and the
+   generated struct loses the field.
+4. **Build — `task test` — before fixing anything.** The compiler is what shows you
+   the readers of the lost field; stars are the common case, not the corner.
+5. **Fix the code, the queries, then the tests,** re-running 3 and 4 after each
+   round, and stop only when the name is gone from the query files:
+
+   ```bash
+   cd server
+   name=<column_name>
+   grep -rnw "$name" services --include='*.sql'
+   ```
+
+   Every hit outside `migrations/` is a leftover, whatever position it is in.
+6. **Ship that release everywhere.** The database still has the object; nothing
+   reads or writes it.
+7. **Then drop it:** `task migrate-new -- <service> drop_<table>_<column>`, the drop
+   in `up`, the re-creation (as a nullable column) in `down`. Ship it in a later
+   release.
+
+Record in the ticket the earliest release that survives the drop. From the moment
+the drop applies, the releases before step 6 cannot be deployed again, and nothing
+in the deploy stops you: it runs `up` only.
+
+### What sqlc and the compiler do not see
+
+These stay manual:
+
+- **SQL outside the query files.** A string passed to `pgx` directly, a script, a
+  test fixture. Grep the whole server, in both spellings — `snake_case` in SQL,
+  `CamelCase` in the generated Go:
+
+  ```bash
+  cd server
+  snake=<column_name>; camel=<ColumnName>
+  for n in "$snake" "$camel"; do grep -rnw "$n" --include='*.go' --include='*.sql' .; done
+  ```
+
+- **PL/pgSQL bodies.** A function binds its names late, so the drop succeeds and the
+  trigger fails on the first write after it. For a hit inside a function in the
+  migrations, read the whole body and the triggers that call it, and change the
+  function by an ordinary migration first.
+- **A whole row serialized to JSON** — `json_agg(r)`, `row_to_json(t)`, `to_jsonb(t)` —
+  names no column: the key leaves the JSON and no type changes. Find them
+  separately, then follow the JSON to its reader (the web app, a stored record):
+
+  ```bash
+  grep -rnEi '(json_agg|jsonb_agg|row_to_json|to_jsonb?)\s*\(\s*\w+\s*[),]' services --include='*.sql'
+  ```
+
+- **External readers** — reports, BI dashboards, other systems reading the database
+  directly. They are in no repository; name them in the ticket and tell their
+  owners.
+
+### An enum value runs the other way round
+
+sqlc does not notice a missing enum value: the literal still generates. So for an
+enum value the order is:
+
+1. **stop writing the value, then move the rows that hold it, then count them** — in
+   that order, each on every environment before the next: a release that stops
+   writing it, rolled out everywhere; a one-off job moving the rows; a
+   `select count(*)` of rows holding the value, zero everywhere. A client decoding
+   the enum strictly (the web app) fails on the first surviving row.
+2. remove the value from the Go constants and from the web app;
+3. let the compiler point at the code;
+4. grep the literal in the queries and the migrations —
+   `grep -rn "'<value>'" services`. A hit inside a function body is fixed by an
+   ordinary migration first.
+5. only then write the migration rebuilding the type without the value, as the
+   `down` of an added value above, and ship it in a later release. Its list of
+   values is a copy of the type the day you wrote it: read it against the latest
+   migrations before merging, or it silently drops a value added in the meantime.
+
+## The images
+
+The local PostgreSQL is pinned in `docker-compose.yml`; dbmate is pinned there and in
+`.docker/migrations.Dockerfile` — bump both dbmate tags in one commit. Keep the
+PostgreSQL major the same as the real environments, so that what passes locally
+passes there.
+
+A major PostgreSQL bump does not migrate the local data volume: `task db:reset`,
+then `task migrate-up`.
+
+## Checklist before the PR
+
+- `task migrate-up` passed, and `task migrate-redo -- <service>` passed (the `down` works).
+- `repository/sql/schema.sql` says what the migrations say — or, while retiring
+  something, less than they say and never more.
+- `task gen` left `repository/db/` committed and in step; `task test` is green.
+- The migration still sorts after everything it depends on, after the rebase.
+- The previous release survives the new schema; nothing is dropped in the release
+  that stops using it.

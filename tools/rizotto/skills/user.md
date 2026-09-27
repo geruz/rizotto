@@ -4,7 +4,7 @@
 
 Installs the users of the project and their sessions: the user service, the area
 function turning a session into the current user of a private route, and the two
-routes every session needs. The project must have been scaffolded with SQL.
+routes every session needs. The project must have `sqlc.yaml`, which make-project writes.
 
 This solution knows nothing about how somebody logs in. `solution add oauth` adds
 that on top; a project with its own way of authenticating people — an internal

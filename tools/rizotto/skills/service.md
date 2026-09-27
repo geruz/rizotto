@@ -160,8 +160,8 @@ SELECT * FROM public.orders ORDER BY created_at DESC, id DESC
 LIMIT sqlc.arg('limit')::bigint OFFSET sqlc.arg('offset')::bigint;
 ```
 
-Every schema change needs both a migration (`repository/migrations/`, applied by
-`task migrate-up`) and the matching edit in `repository/sql/schema.sql`, which is
+Every schema change needs both a migration (`repository/migrations/`, created by
+`task migrate-new -- <service> <name>` and applied by `task migrate-up`) and the matching edit in `repository/sql/schema.sql`, which is
 what sqlc reads. `pg.IsNotFoundError(err)` recognises "no rows"; use `WithTx` on the
 queries for transactions.
 

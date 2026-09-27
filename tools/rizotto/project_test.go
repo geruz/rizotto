@@ -57,18 +57,17 @@ func Test_normalizePath(t *testing.T) {
 func Test_newProject(t *testing.T) {
 	t.Parallel()
 
-	prj, err := newProject("MyShop", "git@github.com:acme/shop.git", "1.25.0", "", true)
+	prj, err := newProject("MyShop", "git@github.com:acme/shop.git", "1.25.0", "")
 	must.NoError(t, err)
 	must.Eq(t, "MyShop", prj.Name)
 	must.Eq(t, "myshop", prj.Slug)
 	must.Eq(t, "github.com/acme/shop/server", prj.Module)
 	must.Eq(t, "github.com/acme/shop", prj.Repo)
 	must.Eq(t, rizottoModule, prj.RizottoModule)
-	must.True(t, prj.SQL)
 
-	_, err = newProject("my-shop", testRepo, "", "", false)
+	_, err = newProject("my-shop", testRepo, "", "")
 	must.Error(t, err)
 
-	_, err = newProject(testName, "not-a-repo", "", "", false)
+	_, err = newProject(testName, "not-a-repo", "", "")
 	must.Error(t, err)
 }

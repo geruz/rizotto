@@ -9,16 +9,17 @@ directory: `{{.Module}}`.
 
 ```sh
 task deps        # resolve the go and the node dependencies
-{{- if .SQL}}
-task migrate-up  # apply the migrations to $DATABASE_URL
-{{- end}}
+task migrate-up  # start PostgreSQL in docker and apply the migrations
 task start       # run the server on $PORT (9090 by default)
 task web:dev     # run the React app on :5173, /api is proxied to the server
 task test        # run the server tests
 task lint        # run golangci-lint
-task gen         # regenerate the service bindings{{if .SQL}} and the sqlc queries{{end}}
+task gen         # regenerate the service bindings and the sqlc queries
 task docker:build # build the docker image {{.Slug}}: the server with the web app
+task docker:build:migrations # build the image {{.Slug}}-migrations that migrates a database
 ```
+
+Docker is required: PostgreSQL, dbmate and sqlc all run in containers.
 
 The root `Taskfile.yml` forwards to `server/Taskfile.yml` and `web/Taskfile.yml`;
 inside either directory `task` runs that part alone.
@@ -39,27 +40,32 @@ cd server && go mod edit -replace {{.RizottoModule}}=../../rizotto
 rizotto skill              # what this project is made of
 rizotto service skill      # services in detail
 rizotto controller skill   # controllers in detail
+rizotto repository skill   # queries, columns and migrations in detail
 ```
 
 `.agents/skills/rizotto/SKILL.md` points coding agents at those same commands, so an
 agent working in this repository asks the installed binary instead of guessing at
-the conventions.
+the conventions. `.agents/skills/database/SKILL.md` is the procedure for changing the
+schema: which task touches which database, how a migration is written and what it
+may do while the previous release is still running.
 
 ## Layout
 
     Taskfile.yml                         forwards to the Taskfiles of server/ and web/
     .agents/skills/rizotto/              the agent skill describing how to work in this project
-    .docker/                             the Dockerfile of the image, its .dockerignore and the .env it ships
+    .agents/skills/database/             the agent skill describing how to change the database schema
+    .docker/                             the Dockerfiles of the two images, their .dockerignore files and the .env the server ships
 
     server/                              the go module
     server/server.go                     wires the settings, the services and the HTTP routes
+    server/sqlc.yaml                     one entry per repository: its queries, its schema and the generated package
+    server/docker-compose.yml            the local PostgreSQL and the dbmate that migrates it
+    server/scripts/migrate.sh            runs dbmate over the migrations of every service
     server/api/controller.go             HTTP contexts shared by the controllers (authentication lives here)
     server/api/doc/                      the OpenAPI document the route tests fill in
     server/services/item/                the item service: the RPC implementation
     server/services/item/item-client/    the item contract; bind-gen.go is generated from client.go by genbind
-{{- if .SQL}}
     server/services/item/repository/     database access: sqlc queries, generated db package and dbmate migrations
-{{- end}}
 
     web/                                 the React app (Vite + TypeScript)
     web/src/                             its sources; web/dist is the build
@@ -74,10 +80,10 @@ rizotto service add    # from the repository root, server/ or web/
 ```
 
 It asks for the service name, whether it works with the database and which CRUD
-methods it needs, writes `server/services/<name>/`{{if .SQL}}, registers the queries in `sqlc.yaml`{{end}}
+methods it needs, writes `server/services/<name>/`, registers the queries in `sqlc.yaml`
 and prints the lines to add to `server/server.go`. Afterwards run `task gen` to regenerate
 `bind-gen.go` (it needs the `genbind` binary:
-`go install {{.RizottoModule}}/tools/genbind@latest`){{if .SQL}} and `task migrate-up` to create the table{{end}}.
+`go install {{.RizottoModule}}/tools/genbind@latest`) and `task migrate-up` to create the table.
 
 ## Adding an HTTP controller
 
@@ -91,16 +97,42 @@ need an authenticated user and under which prefix they live, then writes
 to join in `server/server.go`. The controller builds its context with `PrivateArea` or
 `PublicArea` from `server/api/controller.go`; `task test` runs the route tests, which write
 `server/api/<name>-api/openapi.yml` from the document in `server/api/doc`.
-{{- if .SQL}}
 
 ## Database
 
-`server/sqlc.yaml` generates `server/services/<name>/repository/db` from
-`server/services/<name>/repository/sql`. After changing a query or the schema run
-`task gen` (it uses Docker). Migrations live in
-`server/services/<name>/repository/migrations`; `task migrate-up` applies the migrations of
-every service with [dbmate](https://github.com/amacneil/dbmate).
-{{- end}}
+Every service that owns tables keeps them in `server/services/<name>/repository`:
+
+    migrations/   dbmate migrations, the history of the schema, applied in order
+    sql/          schema.sql, the shape sqlc checks the queries against, and the queries
+    db/           generated by sqlc from sql/ — never edit it
+
+`task gen` regenerates `db/` after a change to a query or to `schema.sql`.
+
+Each service has its own migration history in the table
+`public.dbmate_migrations_<name>`, so services never share migration state.
+`server/scripts/migrate.sh` walks the services and runs
+[dbmate](https://github.com/amacneil/dbmate) for each one; the tasks below run it in
+docker against the local PostgreSQL of `server/docker-compose.yml`:
+
+```sh
+task db:start                          # PostgreSQL on :5432, the DATABASE_URL of server/.env
+task migrate-new -- item add_price     # server/services/item/repository/migrations/<timestamp>_add_price.sql
+task migrate-up                        # apply the pending migrations of every service
+task migrate-redo -- item              # roll back the last migration of item and apply it again
+task migrate-down -- item              # roll back the last migration of item
+task migrate-status                    # what is applied and what is pending
+task db:reset                          # delete the local database with its data
+```
+
+A real environment is never migrated from a workstation: the deploy runs the
+`{{.Slug}}-migrations` image (`task docker:build:migrations`) to completion before the
+new server starts:
+
+```sh
+docker run --rm -e DATABASE_URL=postgres://... {{.Slug}}-migrations
+```
+
+Before writing a migration read `.agents/skills/database/SKILL.md`.
 
 ## Web
 
@@ -118,7 +150,7 @@ serves the web app from `/` next to the API: a page of the app the browser asks
 for gets `index.html`, while a missing asset or API route stays 404.
 
 ```sh
-docker run --rm -p 9090:9090{{if .SQL}} -e DATABASE_URL=postgres://...{{end}} {{.Slug}}
+docker run --rm -p 9090:9090 -e DATABASE_URL=postgres://... {{.Slug}}
 ```
 
 Any variable of `server/.env.example` can be overridden with `-e`. To try the same

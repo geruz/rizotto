@@ -26,7 +26,7 @@ what the project supports, and writes:
 - whatever else the feature is made of, such as the area function of an
   authenticated route.
 
-Migrations are picked up by the `migrate` task on their own: it globs
+Migrations are picked up by `scripts/migrate.sh` on their own: it globs
 `services/*/repository/migrations` and gives each service its own migrations
 table, so nothing has to be registered.
 
