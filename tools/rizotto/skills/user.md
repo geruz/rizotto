@@ -9,11 +9,12 @@ routes every session needs. The project must have `sqlc.yaml`, which make-projec
 This solution knows nothing about how somebody logs in. `solution add oauth` adds
 that on top; a project with its own way of authenticating people — an internal
 directory, a magic link, a password — uses this one alone and calls
-`CreateUserRPC` and `CreateSessionRPC` itself.
+`CreateUserRPC` and `CreateSessionRPC` itself. Since `oauth` never registers
+anybody, creating the users with `CreateUserRPC` is the project's job either way.
 
 ## What it writes
 
-    services/user/user-client/client.go     the contract: 5 RPCs
+    services/user/user-client/client.go     the contract: 6 RPCs
     services/user/user-client/bind-gen.go   the bindings
     services/user/user-service.go           the implementation
     services/user/repository/               repository, queries, migration
@@ -29,6 +30,10 @@ directory, a magic link, a password — uses this one alone and calls
 The email is **not** unique: how a person is identified is the business of whatever
 authenticates them. The same person may reach the project through two providers,
 and a provider may hand out an address another one already used.
+
+`GetUserByEmailRPC` finds a user by email, ignoring case. When several users share
+the email it does not pick one: it answers a validation error with the code
+`user.SharedEmailCode`, and the caller has to tell them apart some other way.
 
 Only the fingerprint of a session token is stored, never the token itself, so a
 leaked database hands over no working sessions. `crypto/token.Secure` generates the

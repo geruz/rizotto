@@ -37,6 +37,9 @@ type Identity struct {
 	ExternalID string
 	Email      string
 	Name       string
+	// EmailVerified tells whether the provider checked that the caller owns Email.
+	// Only a checked email may find the user of an account logging in first.
+	EmailVerified bool
 }
 
 // Provider is one OAuth provider and the credentials it was configured with.
@@ -49,6 +52,8 @@ type Provider struct {
 	idField      string
 	emailField   string
 	nameField    string
+	// verifiedField is empty for a provider answering only checked emails.
+	verifiedField string
 	clientID     string
 	clientSecret string
 }
@@ -72,6 +77,7 @@ func MustLoadProviders() map[string]Provider {
 			idField:      "{{.IDField}}",
 			emailField:   "{{.EmailField}}",
 			nameField:    "{{.NameField}}",
+			verifiedField: "{{.VerifiedField}}",
 			clientID:     env.MustGetStringValue("{{.EnvPrefix}}_CLIENT_ID"),
 			clientSecret: env.MustGetStringValue("{{.EnvPrefix}}_CLIENT_SECRET"),
 		},
@@ -157,10 +163,11 @@ func (p Provider) UserInfo(ctx context.Context, accessToken string) (Identity, e
 	}
 
 	return Identity{
-		Provider:   p.Key,
-		ExternalID: externalID,
-		Email:      field(fields, p.emailField),
-		Name:       field(fields, p.nameField),
+		Provider:      p.Key,
+		ExternalID:    externalID,
+		Email:         field(fields, p.emailField),
+		Name:          field(fields, p.nameField),
+		EmailVerified: p.verifiedField == "" || field(fields, p.verifiedField) == "true",
 	}, nil
 }
 

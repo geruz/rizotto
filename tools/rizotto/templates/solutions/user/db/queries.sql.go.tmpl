@@ -74,6 +74,42 @@ func (q *Queries) DeleteSession(ctx context.Context, tokenHash string) (string, 
 	return token_hash, err
 }
 
+const findUsersByEmail = `-- name: FindUsersByEmail :many
+SELECT id, email, name, created_at, updated_at
+FROM public.users
+WHERE lower(email) = lower($1)
+ORDER BY id
+LIMIT 2
+`
+
+// The email is not unique: at most two rows are read, which is enough to tell one
+// user from several.
+func (q *Queries) FindUsersByEmail(ctx context.Context, lower string) ([]User, error) {
+	rows, err := q.db.Query(ctx, findUsersByEmail, lower)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []User
+	for rows.Next() {
+		var i User
+		if err := rows.Scan(
+			&i.ID,
+			&i.Email,
+			&i.Name,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getSession = `-- name: GetSession :one
 SELECT s.token_hash, s.expires_at, u.id, u.email, u.name
 FROM public.sessions s

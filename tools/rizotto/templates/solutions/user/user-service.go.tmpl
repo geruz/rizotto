@@ -58,6 +58,31 @@ func (srv UserService) GetUserRPC(ctx context.Context, req user.GetUserRequest) 
 	return toUser(dbUser), nil
 }
 
+// GetUserByEmailRPC finds the one user registered with the email. Since the email
+// is not unique, several users sharing it are refused rather than one of them
+// picked at random: whoever asks has to tell them apart some other way.
+func (srv UserService) GetUserByEmailRPC(
+	ctx context.Context, req user.GetUserByEmailRequest,
+) (user.User, bb.ServiceError) {
+	if !validators.Email(req.Email) {
+		return user.User{}, bb.NewInvalidRequestError("invalid email")
+	}
+
+	found, err := srv.repo.FindUsersByEmail(ctx, req.Email)
+	if err != nil {
+		return user.User{}, bb.NewInternalError("failed to find the user", err)
+	}
+
+	switch len(found) {
+	case 0:
+		return user.User{}, bb.NewNotFoundError("user not found")
+	case 1:
+		return toUser(found[0]), nil
+	default:
+		return user.User{}, bb.NewValidationError(user.SharedEmailCode, "several users share the email")
+	}
+}
+
 func (srv UserService) CreateUserRPC(ctx context.Context, req user.CreateUserRequest) (user.User, bb.ServiceError) {
 	if !validators.Email(req.Email) {
 		return user.User{}, bb.NewInvalidRequestError("invalid email")

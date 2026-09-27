@@ -28,6 +28,17 @@ type GetUserRequest struct {
 	UserID int
 }
 
+// GetUserByEmailRequest finds the one user registered with an email. The email is
+// not unique, so several users sharing it is an answer of its own:
+// SharedEmailCode.
+type GetUserByEmailRequest struct {
+	Email string
+}
+
+// SharedEmailCode is the validation error of GetUserByEmailRPC when several users
+// are registered with the email.
+const SharedEmailCode = "shared_email"
+
 type CreateUserRequest struct {
 	Email string
 	Name  string

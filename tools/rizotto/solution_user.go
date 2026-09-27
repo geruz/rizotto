@@ -62,9 +62,17 @@ func userMethods() []serviceMethod {
 		return "http://user-service/" + entity + "/" + action
 	}
 
+	const userResponse = "User"
+
 	return []serviceMethod{
-		{Name: "GetUserRPC", Request: "GetUserRequest", Response: "User", Address: address("user", "get")},
-		{Name: "CreateUserRPC", Request: "CreateUserRequest", Response: "User", Address: address("user", "create")},
+		{Name: "GetUserRPC", Request: "GetUserRequest", Response: userResponse, Address: address("user", "get")},
+		{
+			Name:     "GetUserByEmailRPC",
+			Request:  "GetUserByEmailRequest",
+			Response: userResponse,
+			Address:  address("user", "get-by-email"),
+		},
+		{Name: "CreateUserRPC", Request: "CreateUserRequest", Response: userResponse, Address: address("user", "create")},
 		{
 			Name:     "CreateSessionRPC",
 			Request:  "CreateSessionRequest",

@@ -194,7 +194,8 @@ so these are the reviewed answer rather than one assembled per project.
     api/user-api/             GET  /api/v1/me
                               POST /api/v1/logout
 
-**`oauth`** — logging in through a provider, built on `user`:
+**`oauth`** — logging in through a provider, built on `user`. It logs existing
+users in and never registers anybody: the user has to be created beforehand.
 
     services/identity/        which external account belongs to which user
     services/identity/oauth/  the calls to the provider

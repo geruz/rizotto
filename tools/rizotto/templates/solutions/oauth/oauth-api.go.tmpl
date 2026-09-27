@@ -1,5 +1,6 @@
 // Package oauthapi performs the login: it sends the caller to their OAuth
-// provider and turns the answer into a session of this project.
+// provider and turns the answer into a session of this project. It never
+// registers anybody: the user has to exist before their first login.
 package oauthapi
 
 import (
@@ -35,7 +36,7 @@ type OAuthController struct {
 
 	getIdentityRPC    identity.GetIdentityRPC
 	createIdentityRPC identity.CreateIdentityRPC
-	createUserRPC     user.CreateUserRPC
+	getUserByEmailRPC user.GetUserByEmailRPC
 	createSessionRPC  user.CreateSessionRPC
 }
 
@@ -47,7 +48,7 @@ func NewOAuthController() OAuthController {
 		providers:         oauth.MustLoadProviders(),
 		getIdentityRPC:    identities.GetIdentityRPC,
 		createIdentityRPC: identities.CreateIdentityRPC,
-		createUserRPC:     users.CreateUserRPC,
+		getUserByEmailRPC: users.GetUserByEmailRPC,
 		createSessionRPC:  users.CreateSessionRPC,
 	}
 	ctrl.AddRoutes(
@@ -67,6 +68,9 @@ var (
 		gateway.ErrorCode("unknown_provider"), "Unknown provider", "No OAuth provider of that name is configured",
 	)
 	badCallback   = gateway.NewInvalidRequest("The login could not be completed")
+	notRegistered = gateway.NewForbiddenError(
+		gateway.ErrorCode("not_registered"), "Not registered", "No user of this project goes by this account",
+	)
 	internalError = gateway.NewInternalError()
 )
 
@@ -168,8 +172,9 @@ func identify(ctx context.Context, provider oauth.Provider, code string) (oauth.
 	return provider.UserInfo(ctx, accessToken)
 }
 
-// userOf answers the user behind an external account, creating both the user and
-// the link the first time that account logs in.
+// userOf answers the user behind an external account. The first time an account
+// logs in, it is linked to the existing user with the email the provider checked;
+// an account nobody registered is refused, since logging in never creates a user.
 func (ctrl OAuthController) userOf(
 	ctx api.PublicHTTPContext, external oauth.Identity,
 ) (int, gateway.HTTPError) {
@@ -185,16 +190,25 @@ func (ctrl OAuthController) userOf(
 		return 0, gateway.MapError(err).Others(internalError)
 	}
 
-	created, err := ctrl.createUserRPC(ctx, user.CreateUserRequest{
-		Email: external.Email,
-		Name:  external.Name,
-	})
+	// An email the provider did not check could be anybody's, and would hand
+	// that user over to whoever typed it.
+	if external.Email == "" || !external.EmailVerified {
+		return 0, notRegistered
+	}
+
+	registered, err := ctrl.getUserByEmailRPC(ctx, user.GetUserByEmailRequest{Email: external.Email})
 	if err != nil {
+		// Nobody with that email, or several people sharing it: either way no
+		// single user can be told to be the one logging in.
+		if bb.IsNotFoundError(err) || bb.IsValidationErrorWithCode(err, user.SharedEmailCode) {
+			return 0, notRegistered
+		}
+
 		return 0, gateway.MapError(err).Others(internalError)
 	}
 
 	linked, err := ctrl.createIdentityRPC(ctx, identity.CreateIdentityRequest{
-		UserID:     created.ID,
+		UserID:     registered.ID,
 		Provider:   external.Provider,
 		ExternalID: external.ExternalID,
 	})

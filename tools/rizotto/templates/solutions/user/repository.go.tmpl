@@ -29,6 +29,12 @@ func (r UserRepository) GetUserByID(ctx context.Context, id int64) (db.User, err
 	return r.queries.GetUser(ctx, id)
 }
 
+// FindUsersByEmail answers at most two users registered with the email, ignoring
+// case, which is enough to tell one user from several.
+func (r UserRepository) FindUsersByEmail(ctx context.Context, email string) ([]db.User, error) {
+	return r.queries.FindUsersByEmail(ctx, email)
+}
+
 func (r UserRepository) CreateUser(ctx context.Context, email, name string) (db.User, error) {
 	return r.queries.CreateUser(ctx, db.CreateUserParams{
 		Email: email,

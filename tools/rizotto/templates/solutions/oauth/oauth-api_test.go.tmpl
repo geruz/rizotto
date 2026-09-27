@@ -29,8 +29,12 @@ const (
 	testSession    = "a-valid-session-token"
 	testAppURL     = "http://localhost:3000"
 	testUserID     = 1
-	// knownExternalID already belongs to a user, so no user is created for it.
+	// knownExternalID is already linked to a user, so it is not looked up by email.
 	knownExternalID = "external-known"
+	// strangerCode is the authorization code of a caller no user of the project
+	// goes by: the fake provider describes them with strangerEmail.
+	strangerCode  = "a-stranger-code"
+	strangerEmail = "stranger@example.com"
 )
 
 // TestMain points the solution at a fake provider and registers stub services, so
@@ -62,22 +66,30 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-// serveProvider is the fake OAuth provider: it hands out a token and describes the
-// caller it belongs to.
+// serveProvider is the fake OAuth provider: it hands out the authorization code
+// itself as the token, and describes the caller that code belongs to.
 func serveProvider(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
 	switch {
 	case strings.HasSuffix(r.URL.Path, "/token"):
-		_ = json.NewEncoder(w).Encode(map[string]string{"access_token": "a-provider-token"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"access_token": r.FormValue("code")})
 	case strings.HasSuffix(r.URL.Path, "/userinfo"):
+		email := testEmail
+		if r.Header.Get("Authorization") == "Bearer "+strangerCode {
+			email = strangerEmail
+		}
+
 		// The fields are assigned rather than listed, because two providers may
 		// well name the same one.
-		fields := map[string]string{}
+		fields := map[string]any{}
 {{range .Providers}}
 		fields["{{.IDField}}"] = testExternalID
-		fields["{{.EmailField}}"] = testEmail
+		fields["{{.EmailField}}"] = email
 		fields["{{.NameField}}"] = testName
+{{- if .VerifiedField}}
+		fields["{{.VerifiedField}}"] = true
+{{- end}}
 {{end}}
 		_ = json.NewEncoder(w).Encode(fields)
 	default:
@@ -107,6 +119,17 @@ type stubUserService struct{}
 
 func (stubUserService) GetUserRPC(_ context.Context, req user.GetUserRequest) (user.User, bb.ServiceError) {
 	return user.User{ID: req.UserID, Email: testEmail, Name: testName}, nil
+}
+
+// GetUserByEmailRPC knows only the user registered with testEmail.
+func (stubUserService) GetUserByEmailRPC(
+	_ context.Context, req user.GetUserByEmailRequest,
+) (user.User, bb.ServiceError) {
+	if req.Email != testEmail {
+		return user.User{}, bb.NewNotFoundError("user not found")
+	}
+
+	return user.User{ID: testUserID, Email: testEmail, Name: testName}, nil
 }
 
 func (stubUserService) CreateUserRPC(_ context.Context, req user.CreateUserRequest) (user.User, bb.ServiceError) {
@@ -183,6 +206,7 @@ func Test_CallbackRoute(t *testing.T) {
 			openapi.Description("Finishes the login and hands out a session."),
 		).
 		Case("logged in", testCallbackCase).
+		Case("not registered", testCallbackNotRegisteredCase).
 		Case("wrong state", testCallbackWrongStateCase)
 }
 
@@ -203,6 +227,23 @@ func testCallbackCase(t *testing.T, ctr OAuthController, cfg api.RequestConfigur
 	answer := call.Answer()
 	must.Eq(t, http.StatusFound, answer.StatusCode)
 	must.StrHasPrefix(t, testAppURL, answer.Header.Get("Location"))
+}
+
+// testCallbackNotRegisteredCase pins that logging in never registers anybody: a
+// caller whose email no user has is refused.
+func testCallbackNotRegisteredCase(t *testing.T, ctr OAuthController, cfg api.RequestConfiguration) {
+	t.Helper()
+	// arrange
+	const state = "the-state-we-sent"
+
+	// act
+	api.TestAPICall(t, ctr, ctr.callback, cfg.
+		WithPathVar("provider", testProvider).
+		WithQuery("code="+strangerCode+"&state="+state).
+		WithCookie(StateCookieName, state)).
+		AddInDocumentation(t, "An account no user of the project goes by").
+		ExpectedRequest(t, CallbackRequest{Provider: testProvider, Code: strangerCode, State: state}).
+		ExpectedError(t, notRegistered)
 }
 
 // testCallbackWrongStateCase pins that a callback nobody started is refused: this

@@ -6,6 +6,12 @@ Installs the OAuth login: the identity service remembering which external accoun
 belongs to which user, the calls to the providers, and the two routes performing
 the login.
 
+It **only logs users in, it never registers them**. The user has to exist before
+their first login, created by the project with `user.CreateUserRPC` (an admin
+route, an invitation, a seed). The first login of an external account finds that
+user by the email the provider vouches for and links the account to it; every later
+login goes by the link alone.
+
 It **requires** the `user` solution, which owns the users and the sessions, and
 installs it first with its defaults when the project does not have it yet. Install
 `user` by name first if you want to answer its `-session` question yourself.
@@ -48,10 +54,20 @@ The controller orchestrates, and the services stay independent — neither calls
 other:
 
     identity.GetIdentityRPC      is this external account known?
-    user.CreateUserRPC           no: make the user
-    identity.CreateIdentityRPC   and link the account to it
+    user.GetUserByEmailRPC       no: which user has the email the provider checked?
+    identity.CreateIdentityRPC   link the account to that user
     user.CreateSessionRPC        issue the session
     api.HandOverSession          hand it to the caller, however sessions travel here
+
+The callback answers `403 not_registered` and hands out no session when the account
+is not linked yet and no single user can be found for it:
+
+- the provider answered no email, or an email it has not verified. An unchecked
+  address could be anybody's, and matching on it would hand that user over to
+  whoever typed it;
+- no user has that email;
+- several users share it (`user.SharedEmailCode`): the email of the user solution
+  is not unique, and picking one of them would be a guess.
 
 The last line is the whole coupling. This solution never learns whether the session
 went out as a cookie or on a fragment.
@@ -74,13 +90,15 @@ provider inside the process; a staging environment can use it too.
 
 `knownProviders` in `tools/rizotto/solution_oauth.go` is the table: an entry is the
 three endpoints, the scope, and the names of the id, email and name fields of the
-user info answer. The exchange is plain `net/http`, so a provider that follows the
+user info answer, plus the field telling whether the email is verified
+(`email_verified` for Google). Leave that one empty only for a provider that never
+answers an unverified address — GitHub's public email is always a verified one. A
+GitHub account keeping its email private answers none, and cannot log in. The exchange is plain `net/http`, so a provider that follows the
 authorization code flow needs no code, only a row.
 
 ## What it deliberately leaves out
 
 No PKCE — the flow runs server side with a client secret, where PKCE adds nothing.
 No refresh tokens: the provider's access token is used once, to ask who the caller
-is, and then dropped; the session of this project is what lasts. No account
-linking: two providers answering for the same person produce two users, and merging
-them is a decision only the project can make.
+is, and then dropped; the session of this project is what lasts. No
+registration: an account nobody created a user for is refused, as described above.

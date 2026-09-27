@@ -41,6 +41,12 @@ func (stubUserService) GetUserRPC(_ context.Context, req user.GetUserRequest) (u
 	return user.User{ID: req.UserID, Email: testEmail, Name: testName}, nil
 }
 
+func (stubUserService) GetUserByEmailRPC(
+	_ context.Context, req user.GetUserByEmailRequest,
+) (user.User, bb.ServiceError) {
+	return user.User{ID: testUserID, Email: req.Email, Name: testName}, nil
+}
+
 func (stubUserService) CreateUserRPC(_ context.Context, req user.CreateUserRequest) (user.User, bb.ServiceError) {
 	return user.User{ID: testUserID, Email: req.Email, Name: req.Name}, nil
 }

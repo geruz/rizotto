@@ -13,7 +13,8 @@ const oauthUsage = `Usage:
 
 Installs the OAuth login: the identity service remembering which external account
 belongs to which user, the calls to the providers, and the two routes performing
-the login.
+the login. It only logs users in, never registers them: the first login of an
+account links it to the existing user with the email the provider vouches for.
 
 It is built on the "user" solution, which owns the users and the sessions, and
 installs it first when the project does not have it yet.
@@ -44,6 +45,9 @@ type authProvider struct {
 	IDField    string
 	EmailField string
 	NameField  string
+	// VerifiedField is the field telling whether the provider checked the email.
+	// Empty means the provider only ever answers checked addresses.
+	VerifiedField string
 }
 
 const (
@@ -56,16 +60,17 @@ const (
 //nolint:gochecknoglobals,gosec // the table is static; G101 reads TokenURL as a credential
 var knownProviders = []authProvider{
 	{
-		Key:          providerGoogle,
-		Name:         "Google",
-		EnvPrefix:    "OAUTH_GOOGLE",
-		AuthorizeURL: "https://accounts.google.com/o/oauth2/v2/auth",
-		TokenURL:     "https://oauth2.googleapis.com/token",
-		UserInfoURL:  "https://openidconnect.googleapis.com/v1/userinfo",
-		Scope:        "openid email profile",
-		IDField:      "sub",
-		EmailField:   "email",
-		NameField:    "name",
+		Key:           providerGoogle,
+		Name:          "Google",
+		EnvPrefix:     "OAUTH_GOOGLE",
+		AuthorizeURL:  "https://accounts.google.com/o/oauth2/v2/auth",
+		TokenURL:      "https://oauth2.googleapis.com/token",
+		UserInfoURL:   "https://openidconnect.googleapis.com/v1/userinfo",
+		Scope:         "openid email profile",
+		IDField:       "sub",
+		EmailField:    "email",
+		NameField:     "name",
+		VerifiedField: "email_verified",
 	},
 	{
 		Key:          providerGitHub,
@@ -78,6 +83,8 @@ var knownProviders = []authProvider{
 		IDField:      "id",
 		EmailField:   "email",
 		NameField:    "name",
+		// The public email of a GitHub account can only be a verified one.
+		VerifiedField: "",
 	},
 }
 
