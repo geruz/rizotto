@@ -13,6 +13,7 @@ import (
 const (
 	providersFlag = "-providers"
 	sessionFlag   = "-session"
+	downloadFlag  = "-download"
 	forceFlag     = "-force"
 )
 
@@ -157,6 +158,67 @@ func Test_runSolutionAdd_KeepsAnAlreadyInstalledDependency(t *testing.T) {
 	must.Eq(t, area, readFile(t, root, "api/auth-area.go"))
 }
 
+func Test_runSolutionAdd_WritesTheFilesVertical(t *testing.T) {
+	t.Parallel()
+
+	root := newSQLProjectDir(t)
+	out := &bytes.Buffer{}
+
+	err := runSolution(
+		addSolutionArgs(filesSolutionName, root, downloadFlag, downloadRedirect), strings.NewReader(""), out)
+	must.NoError(t, err)
+
+	mustHaveFiles(t, root, written(out.String()),
+		"services/file/file-client/client.go",
+		"services/file/file-client/bind-gen.go",
+		"services/file/file-service.go",
+		"services/file/storage/s3.go",
+		"services/file/storage/s3_test.go",
+		"services/file/repository/file-repository.go",
+		"services/file/repository/sql/schema.sql",
+		"services/file/repository/sql/file-queries.sql",
+		"services/file/repository/migrations/000001_create_files.sql",
+		"services/file/repository/db/db.go",
+		"services/file/repository/db/models.go",
+		"services/file/repository/db/file-queries.sql.go",
+		"api/file-api/file.go",
+		"api/file-api/file_test.go",
+		// pulled in as a dependency
+		"services/user/user-service.go",
+		"api/auth-area.go",
+	)
+
+	printed := out.String()
+	must.StrContains(t, printed, `"files" requires "user"`)
+	must.StrContains(t, printed, "S3_BUCKET")
+	must.StrContains(t, printed, "file.RegisterServer")
+}
+
+// Test_runSolutionAdd_FilesDownloadVariants pins that the flag reaches the
+// generated code rather than only the report.
+func Test_runSolutionAdd_FilesDownloadVariants(t *testing.T) {
+	t.Parallel()
+
+	cases := map[string]string{
+		downloadRedirect: "gateway.Redirect(\"GET /api/v1/files/{file_id}/content\"",
+		downloadURL:      "gateway.JSONMethod(\"GET /api/v1/files/{file_id}/content\"",
+	}
+
+	for download, expected := range cases {
+		t.Run(download, func(t *testing.T) {
+			t.Parallel()
+
+			root := newSQLProjectDir(t)
+			out := &bytes.Buffer{}
+
+			err := runSolution(
+				addSolutionArgs(filesSolutionName, root, downloadFlag, download), strings.NewReader(""), out)
+			must.NoError(t, err)
+			must.StrContains(t, readFile(t, root, "api/file-api/file.go"), expected)
+		})
+	}
+}
+
 func Test_runSolutionAdd_RegistersItsQueriesWithSqlc(t *testing.T) {
 	t.Parallel()
 
@@ -260,6 +322,7 @@ func Test_runSolution_PrintsSkills(t *testing.T) {
 		"":                "# Solutions",
 		userSolutionName:  "# Users",
 		oauthSolutionName: "# OAuth",
+		filesSolutionName: "# Files",
 	}
 
 	for name, heading := range cases {
@@ -292,6 +355,30 @@ func Test_installOrder_PutsDependenciesFirst(t *testing.T) {
 	must.NoError(t, err)
 	must.SliceLen(t, 1, order)
 	must.Eq(t, userSolutionName, order[0].Name())
+
+	order, err = installOrder(filesSolution{}, prj)
+	must.NoError(t, err)
+	must.SliceLen(t, 2, order)
+	must.Eq(t, userSolutionName, order[0].Name())
+	must.Eq(t, filesSolutionName, order[1].Name())
+}
+
+// Test_Requires_NamesKnownSolutions pins that every requirement in the registry
+// resolves, so a typo cannot ship as a runtime failure.
+func Test_Requires_NamesKnownSolutions(t *testing.T) {
+	t.Parallel()
+
+	prj := projectInfo{Root: newSQLProjectDir(t), Module: testModule, SQL: true, Services: nil}
+
+	for _, sol := range solutions {
+		for _, name := range sol.Requires() {
+			_, err := findSolution(name)
+			must.NoError(t, err, must.Sprintf("%s requires %q", sol.Name(), name))
+		}
+
+		_, err := installOrder(sol, prj)
+		must.NoError(t, err, must.Sprintf("the requirements of %s must resolve", sol.Name()))
+	}
 }
 
 func Test_normalizeProviders(t *testing.T) {

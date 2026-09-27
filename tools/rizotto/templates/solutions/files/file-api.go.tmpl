@@ -1,0 +1,234 @@
+// Package fileapi hands out the links a caller uploads and downloads with. The
+// bytes go straight to the storage, so no request here ever carries a file.
+package fileapi
+
+import (
+	"time"
+
+	"github.com/samber/lo"
+
+	"{{.RizottoModule}}"
+	"{{.RizottoModule}}/bb"
+	"{{.RizottoModule}}/gateway"
+
+	"{{.APIImport}}"
+	file "{{.ClientImport}}"
+)
+
+type FileController struct {
+	gateway.Controller
+
+	createFileRPC  file.CreateFileRPC
+	confirmFileRPC file.ConfirmFileRPC
+	getFileRPC     file.GetFileRPC
+	getFileLinkRPC file.GetFileLinkRPC
+	selectFilesRPC file.SelectFilesRPC
+	deleteFileRPC  file.DeleteFileRPC
+}
+
+func NewFileController() FileController {
+	client := file.BindClient()
+	ctrl := FileController{
+		Controller:     rizotto.Controller{},
+		createFileRPC:  client.CreateFileRPC,
+		confirmFileRPC: client.ConfirmFileRPC,
+		getFileRPC:     client.GetFileRPC,
+		getFileLinkRPC: client.GetFileLinkRPC,
+		selectFilesRPC: client.SelectFilesRPC,
+		deleteFileRPC:  client.DeleteFileRPC,
+	}
+	ctrl.AddRoutes(
+		gateway.JSONMethod("POST /api/v1/files", api.AuthArea, ctrl.createFile),
+		gateway.JSONMethod("POST /api/v1/files/{file_id}/confirm", api.AuthArea, ctrl.confirmFile),
+		gateway.JSONMethod("GET /api/v1/files", api.AuthArea, ctrl.listFiles),
+		gateway.JSONMethod("GET /api/v1/files/{file_id}", api.AuthArea, ctrl.getFile),
+{{if .Redirect}}		gateway.Redirect("GET /api/v1/files/{file_id}/content", api.AuthArea, ctrl.fileContent),
+{{else}}		gateway.JSONMethod("GET /api/v1/files/{file_id}/content", api.AuthArea, ctrl.fileContent),
+{{end}}		gateway.JSONMethod("DELETE /api/v1/files/{file_id}", api.AuthArea, ctrl.deleteFile),
+	)
+
+	return ctrl
+}
+
+// Errors.
+//
+//nolint:gochecknoglobals // the errors of a controller are declared once
+var (
+	fileNotFound = gateway.NewNotFoundError(
+		gateway.ErrorCode("file_not_found"), "File not found", "No file of yours has that id",
+	)
+	fileTooLarge = gateway.NewInvalidRequest("The file is larger than allowed")
+	notUploaded  = gateway.NewInvalidRequest("The file has no bytes yet")
+	internalError = gateway.NewInternalError()
+)
+
+type CreateFileRequest struct {
+	Name        string `json:"name"        validate:"required,max=255"`
+	ContentType string `json:"contentType" validate:"required,max=255"`
+	Size        int64  `json:"size"        validate:"required,gt=0"`
+}
+
+type FileRequest struct {
+	// json:"-" keeps the json body from overwriting what the path carries.
+	FileID int `in:"path=file_id" json:"-"`
+}
+
+type FileListRequest struct {
+	Offset int `in:"query=offset;default=0" json:"-"`
+	Limit  int `in:"query=limit;default=10" json:"-"`
+}
+
+type File struct {
+	ID          int    `json:"id"`
+	Name        string `json:"name"`
+	ContentType string `json:"contentType"`
+	Size        int64  `json:"size"`
+	Status      string `json:"status"`
+}
+
+// Upload is the answer to a create: the file, and where to PUT its bytes.
+type Upload struct {
+	File      File      `json:"file"`
+	UploadURL string    `json:"uploadUrl"`
+	ExpiresAt time.Time `json:"expiresAt"`
+}
+
+type FileList struct {
+	Offset int    `json:"offset"`
+	Limit  int    `json:"limit"`
+	Files  []File `json:"files"`
+}
+
+type DeletedFile struct {
+	ID int `json:"id"`
+}
+{{if not .Redirect}}
+// Download is where the bytes may be read, and until when.
+type Download struct {
+	URL       string    `json:"url"`
+	ExpiresAt time.Time `json:"expiresAt"`
+}
+{{end}}
+// createFile announces a file and answers the link to upload it with. The caller
+// PUTs the bytes to that link itself, then calls confirm.
+func (ctrl FileController) createFile(
+	ctx api.AuthHTTPContext, req CreateFileRequest,
+) (Upload, gateway.HTTPError) {
+	upload, err := ctrl.createFileRPC(ctx, file.CreateFileRequest{
+		UserID:      ctx.User.ID,
+		Name:        req.Name,
+		ContentType: req.ContentType,
+		Size:        req.Size,
+	})
+	if err != nil {
+		return Upload{}, mapFileError(err)
+	}
+
+	return Upload{
+		File:      serviceFileToAPIFile(upload.File, 0),
+		UploadURL: upload.UploadURL,
+		ExpiresAt: upload.ExpiresAt,
+	}, nil
+}
+
+// confirmFile is what makes a file usable: it checks the bytes arrived.
+func (ctrl FileController) confirmFile(
+	ctx api.AuthHTTPContext, req FileRequest,
+) (File, gateway.HTTPError) {
+	confirmed, err := ctrl.confirmFileRPC(ctx, file.ConfirmFileRequest{
+		UserID: ctx.User.ID,
+		FileID: req.FileID,
+	})
+	if err != nil {
+		return File{}, mapFileError(err)
+	}
+
+	return serviceFileToAPIFile(confirmed, 0), nil
+}
+
+func (ctrl FileController) getFile(ctx api.AuthHTTPContext, req FileRequest) (File, gateway.HTTPError) {
+	found, err := ctrl.getFileRPC(ctx, file.GetFileRequest{UserID: ctx.User.ID, FileID: req.FileID})
+	if err != nil {
+		return File{}, mapFileError(err)
+	}
+
+	return serviceFileToAPIFile(found, 0), nil
+}
+
+func (ctrl FileController) listFiles(
+	ctx api.AuthHTTPContext, req FileListRequest,
+) (FileList, gateway.HTTPError) {
+	list, err := ctrl.selectFilesRPC(ctx, file.SelectFilesRequest{
+		UserID: ctx.User.ID,
+		Offset: req.Offset,
+		Limit:  req.Limit,
+	})
+	if err != nil {
+		return FileList{}, mapFileError(err)
+	}
+
+	return FileList{
+		Offset: list.Offset,
+		Limit:  list.Limit,
+		Files:  lo.Map(list.Files, serviceFileToAPIFile),
+	}, nil
+}
+{{if .Redirect}}
+// fileContent sends the caller to the storage, which serves the bytes.
+func (ctrl FileController) fileContent(
+	ctx api.AuthHTTPContext, req FileRequest,
+) (gateway.Redirection, gateway.HTTPError) {
+	link, err := ctrl.getFileLinkRPC(ctx, file.GetFileLinkRequest{UserID: ctx.User.ID, FileID: req.FileID})
+	if err != nil {
+		return gateway.Redirection{Location: "", Status: 0}, mapFileError(err)
+	}
+
+	return gateway.Redirection{Location: link.URL, Status: 0}, nil
+}
+{{else}}
+// fileContent answers where the bytes may be read. The caller fetches them itself.
+func (ctrl FileController) fileContent(
+	ctx api.AuthHTTPContext, req FileRequest,
+) (Download, gateway.HTTPError) {
+	link, err := ctrl.getFileLinkRPC(ctx, file.GetFileLinkRequest{UserID: ctx.User.ID, FileID: req.FileID})
+	if err != nil {
+		return Download{}, mapFileError(err)
+	}
+
+	return Download{URL: link.URL, ExpiresAt: link.ExpiresAt}, nil
+}
+{{end}}
+func (ctrl FileController) deleteFile(
+	ctx api.AuthHTTPContext, req FileRequest,
+) (DeletedFile, gateway.HTTPError) {
+	deleted, err := ctrl.deleteFileRPC(ctx, file.DeleteFileRequest{UserID: ctx.User.ID, FileID: req.FileID})
+	if err != nil {
+		return DeletedFile{}, mapFileError(err)
+	}
+
+	return DeletedFile{ID: deleted.FileID}, nil
+}
+
+// mapFileError turns the answers of the service into the ones of the API. The two
+// validation codes are the ones a caller can do something about.
+func mapFileError(err error) gateway.HTTPError {
+	if bb.IsValidationErrorWithCode(err, file.ErrorCodeTooLarge) {
+		return fileTooLarge
+	}
+
+	if bb.IsValidationErrorWithCode(err, file.ErrorCodeNotUploaded) {
+		return notUploaded
+	}
+
+	return gateway.MapError(err).IfNotFound(fileNotFound).Others(internalError)
+}
+
+func serviceFileToAPIFile(src file.File, _ int) File {
+	return File{
+		ID:          src.ID,
+		Name:        src.Name,
+		ContentType: src.ContentType,
+		Size:        src.Size,
+		Status:      src.Status,
+	}
+}

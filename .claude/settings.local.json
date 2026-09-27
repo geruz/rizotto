@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(go run *)",
+      "Bash(timeout 60 go run github.com/geruz/rizotto/tools/rizotto controller add -service order -methods \"read,list,create\" -auth yes -skip-tidy)"
+    ]
+  }
+}

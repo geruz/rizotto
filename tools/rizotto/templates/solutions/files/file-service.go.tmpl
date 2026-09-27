@@ -1,0 +1,302 @@
+// Package filesrv owns the files of {{.Module}}: their metadata here, their bytes
+// in the object storage.
+package filesrv
+
+import (
+	"context"
+	"errors"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"{{.RizottoModule}}/bb"
+	"{{.RizottoModule}}/crypto/token"
+	"{{.RizottoModule}}/pg"
+	"{{.RizottoModule}}/settings/env"
+
+	file "{{.ClientImport}}"
+	"{{.Module}}/{{.Dir}}/repository"
+	"{{.Module}}/{{.Dir}}/repository/db"
+	"{{.StorageImport}}"
+)
+
+const (
+	// keyLength is the number of hex characters naming an object. The name the
+	// caller sent never reaches the key.
+	keyLength = 32
+	// maxNameLength and maxContentTypeLength match the columns.
+	maxNameLength        = 255
+	maxContentTypeLength = 255
+	// maxExtensionLength keeps a made up extension from filling the key.
+	maxExtensionLength = 10
+
+	defaultMaxUploadMB = 25
+	bytesPerMB         = 1024 * 1024
+
+	defaultListLimit = 10
+	maxListLimit     = 100
+)
+
+type FileService struct {
+	repo    repository.FileRepository
+	storage storage.Storage
+	maxSize int64
+}
+
+// MustNewFileService reads the storage configuration and panics when it is
+// incomplete, so a misconfigured deployment fails at startup.
+func MustNewFileService(pool *pgxpool.Pool) FileService {
+	megabytes := env.GetIntValue("S3_MAX_UPLOAD_MB", defaultMaxUploadMB)
+
+	return FileService{
+		repo:    repository.NewFileRepository(pool),
+		storage: storage.MustLoad(),
+		maxSize: int64(megabytes) * bytesPerMB,
+	}
+}
+
+// CreateFileRPC writes down what is about to be uploaded and answers where to put
+// it. The file counts as pending until ConfirmFileRPC finds the bytes.
+func (srv FileService) CreateFileRPC(
+	ctx context.Context, req file.CreateFileRequest,
+) (file.Upload, bb.ServiceError) {
+	err := validateCreate(req, srv.maxSize)
+	if err != nil {
+		return file.Upload{}, err
+	}
+
+	objectKey, keyErr := srv.objectKey(req.UserID, req.Name)
+	if keyErr != nil {
+		return file.Upload{}, bb.NewInternalError("failed to name the object", keyErr)
+	}
+
+	created, keyErr := srv.repo.CreateFile(ctx, int64(req.UserID), objectKey, req.Name, req.ContentType, req.Size)
+	if keyErr != nil {
+		return file.Upload{}, bb.NewInternalError("failed to create the file", keyErr)
+	}
+
+	link, keyErr := srv.storage.UploadLink(objectKey)
+	if keyErr != nil {
+		return file.Upload{}, bb.NewInternalError("failed to sign the upload link", keyErr)
+	}
+
+	return file.Upload{
+		File:      toFile(created),
+		UploadURL: link,
+		ExpiresAt: srv.expiry(),
+	}, nil
+}
+
+// ConfirmFileRPC asks the storage whether the upload happened, and records the
+// size it actually has rather than the one the caller announced.
+func (srv FileService) ConfirmFileRPC(
+	ctx context.Context, req file.ConfirmFileRequest,
+) (file.File, bb.ServiceError) {
+	found, err := srv.own(ctx, req.FileID, req.UserID)
+	if err != nil {
+		return file.File{}, err
+	}
+
+	size, sizeErr := srv.storage.Size(found.ObjectKey)
+	if sizeErr != nil {
+		if errors.Is(sizeErr, storage.ErrObjectMissing) {
+			return file.File{}, bb.NewValidationError(file.ErrorCodeNotUploaded, "the bytes are not in the storage")
+		}
+
+		return file.File{}, bb.NewInternalError("failed to ask the storage", sizeErr)
+	}
+
+	if size > srv.maxSize {
+		// The link only says where to put the bytes, not how many, so this is the
+		// first moment the real size is known.
+		_ = srv.storage.Delete(found.ObjectKey)
+
+		return file.File{}, bb.NewValidationError(file.ErrorCodeTooLarge, "the uploaded file is larger than allowed")
+	}
+
+	ready, sizeErr := srv.repo.MarkFileReady(ctx, int64(req.FileID), int64(req.UserID), size)
+	if sizeErr != nil {
+		return file.File{}, bb.NewInternalError("failed to mark the file ready", sizeErr)
+	}
+
+	return toFile(ready), nil
+}
+
+func (srv FileService) GetFileRPC(ctx context.Context, req file.GetFileRequest) (file.File, bb.ServiceError) {
+	found, err := srv.own(ctx, req.FileID, req.UserID)
+	if err != nil {
+		return file.File{}, err
+	}
+
+	return toFile(found), nil
+}
+
+// GetFileLinkRPC answers where the bytes may be read, for as long as the link
+// lasts. A file whose upload never finished has nothing to read.
+func (srv FileService) GetFileLinkRPC(ctx context.Context, req file.GetFileLinkRequest) (file.Link, bb.ServiceError) {
+	found, err := srv.own(ctx, req.FileID, req.UserID)
+	if err != nil {
+		return file.Link{}, err
+	}
+
+	if found.Status != file.StatusReady {
+		return file.Link{}, bb.NewValidationError(file.ErrorCodeNotUploaded, "the file has no bytes yet")
+	}
+
+	link, linkErr := srv.storage.DownloadLink(found.ObjectKey)
+	if linkErr != nil {
+		return file.Link{}, bb.NewInternalError("failed to sign the download link", linkErr)
+	}
+
+	return file.Link{URL: link, ExpiresAt: srv.expiry()}, nil
+}
+
+func (srv FileService) SelectFilesRPC(
+	ctx context.Context, req file.SelectFilesRequest,
+) (file.FileList, bb.ServiceError) {
+	if req.UserID <= 0 {
+		return file.FileList{}, bb.NewInvalidRequestError("invalid user id")
+	}
+
+	limit, offset := page(req.Limit, req.Offset)
+
+	rows, err := srv.repo.SelectFiles(ctx, int64(req.UserID), limit, offset)
+	if err != nil {
+		return file.FileList{}, bb.NewInternalError("failed to select the files", err)
+	}
+
+	files := make([]file.File, 0, len(rows))
+	for _, row := range rows {
+		files = append(files, toFile(row))
+	}
+
+	return file.FileList{Offset: int(offset), Limit: int(limit), Files: files}, nil
+}
+
+// DeleteFileRPC drops the row and the object. The row goes first: a row without
+// its bytes is a broken file, while an object without its row is only waste.
+func (srv FileService) DeleteFileRPC(
+	ctx context.Context, req file.DeleteFileRequest,
+) (file.DeletedFile, bb.ServiceError) {
+	found, err := srv.own(ctx, req.FileID, req.UserID)
+	if err != nil {
+		return file.DeletedFile{}, err
+	}
+
+	_, deleteErr := srv.repo.DeleteFile(ctx, int64(req.FileID), int64(req.UserID))
+	if deleteErr != nil {
+		return file.DeletedFile{}, bb.NewInternalError("failed to delete the file", deleteErr)
+	}
+
+	deleteErr = srv.storage.Delete(found.ObjectKey)
+	if deleteErr != nil {
+		return file.DeletedFile{}, bb.NewInternalError("failed to delete the object", deleteErr)
+	}
+
+	return file.DeletedFile{FileID: req.FileID}, nil
+}
+
+// own reads a file of that caller. A file of somebody else is a not-found rather
+// than a forbidden: the service must not confirm that it exists.
+func (srv FileService) own(ctx context.Context, fileID, userID int) (db.File, bb.ServiceError) {
+	if fileID <= 0 || userID <= 0 {
+		return db.File{}, bb.NewInvalidRequestError("invalid file or user id")
+	}
+
+	found, err := srv.repo.GetFile(ctx, int64(fileID), int64(userID))
+	if err != nil {
+		if pg.IsNotFoundError(err) {
+			return db.File{}, bb.NewNotFoundError("file not found")
+		}
+
+		return db.File{}, bb.NewInternalError("failed to get the file", err)
+	}
+
+	return found, nil
+}
+
+// objectKey names the object: the prefix of its owner, a random name and the
+// extension of what was uploaded. Nothing the caller sent is used as a path.
+func (srv FileService) objectKey(userID int, name string) (string, error) {
+	random, err := token.Secure(keyLength)
+	if err != nil {
+		return "", err
+	}
+
+	return strconv.Itoa(userID) + "/" + random + extensionOf(name), nil
+}
+
+func (srv FileService) expiry() time.Time {
+	return time.Now().UTC().Add(srv.storage.TTL())
+}
+
+func validateCreate(req file.CreateFileRequest, maxSize int64) bb.ServiceError {
+	if req.UserID <= 0 {
+		return bb.NewInvalidRequestError("invalid user id")
+	}
+
+	if req.Name == "" || len(req.Name) > maxNameLength {
+		return bb.NewInvalidRequestError("the name is empty or too long")
+	}
+
+	if req.ContentType == "" || len(req.ContentType) > maxContentTypeLength {
+		return bb.NewInvalidRequestError("the content type is empty or too long")
+	}
+
+	if req.Size <= 0 {
+		return bb.NewInvalidRequestError("the size must be positive")
+	}
+
+	if req.Size > maxSize {
+		return bb.NewValidationError(file.ErrorCodeTooLarge, "the announced size is larger than allowed")
+	}
+
+	return nil
+}
+
+// extensionOf keeps the extension of the uploaded name, reduced to what is safe
+// in a key. Anything surprising simply loses its extension.
+func extensionOf(name string) string {
+	ext := strings.ToLower(strings.TrimPrefix(filepath.Ext(name), "."))
+	if ext == "" || len(ext) > maxExtensionLength {
+		return ""
+	}
+
+	for index := range len(ext) {
+		char := ext[index]
+		if (char < 'a' || char > 'z') && (char < '0' || char > '9') {
+			return ""
+		}
+	}
+
+	return "." + ext
+}
+
+func page(limit, offset int) (int64, int64) {
+	if limit <= 0 {
+		limit = defaultListLimit
+	}
+
+	if limit > maxListLimit {
+		limit = maxListLimit
+	}
+
+	if offset < 0 {
+		offset = 0
+	}
+
+	return int64(limit), int64(offset)
+}
+
+func toFile(row db.File) file.File {
+	return file.File{
+		ID:          int(row.ID),
+		Name:        row.Name,
+		ContentType: row.ContentType,
+		Size:        row.SizeBytes,
+		Status:      row.Status,
+	}
+}

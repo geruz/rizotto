@@ -171,9 +171,24 @@ so these are the reviewed answer rather than one assembled per project.
     api/oauth-api/            GET /api/v1/auth/{provider}/start
                               GET /api/v1/auth/{provider}/callback
 
-Only the fingerprint of a session token is stored, never the token, and a callback
-whose state does not match the one we sent is refused. `rizotto solution skill
-user` and `... skill oauth` cover the tables, the flow and the configuration.
+**`files`** — files on S3 compatible storage, built on `user`:
+
+    services/file/            the metadata, the ownership and the size limit
+    services/file/storage/    Signature Version 4, presigned links only
+    api/file-api/             POST   /api/v1/files            announce, get an upload link
+                              POST   /api/v1/files/{id}/confirm  check the bytes arrived
+                              GET    /api/v1/files            the files of the caller
+                              GET    /api/v1/files/{id}/content  where to read the bytes
+                              DELETE /api/v1/files/{id}
+
+The bytes never pass through the service: a caller PUTs the file to the presigned
+link itself, which is also why no multipart parsing is needed anywhere. The object
+key is generated, never built out of the name the caller sent.
+
+Only the fingerprint of a session token is stored, never the token; a callback
+whose state does not match the one we sent is refused; a file of another owner
+reads as missing rather than forbidden. `rizotto solution skill <name>` covers the
+tables, the flow and the configuration of each.
 
 ### Solutions built on solutions
 
@@ -206,8 +221,9 @@ overwrite are listed and refused unless `-force` says otherwise.
 | `-skip-tidy` | do not run `go mod tidy` in the project                        |
 
 `user` additionally takes `-session` (`cookie` for a browser application, `bearer`
-for a native client) and `oauth` takes `-providers` (`google`, `github`). Writing a
-new solution is described by `rizotto solution skill`.
+for a native client), `oauth` takes `-providers` (`google`, `github`) and `files`
+takes `-download` (`redirect` to the storage, or the link in the json answer).
+Writing a new solution is described by `rizotto solution skill`.
 
 ### rizotto skill
 
@@ -220,6 +236,7 @@ rizotto controller skill   # controllers in detail: routing, request objects, co
 rizotto solution skill     # what a solution is, how one is installed and how to write another
 rizotto solution skill user  # users and sessions in detail
 rizotto solution skill oauth # the OAuth login in detail: tables, flow, configuration
+rizotto solution skill files # file storage in detail: the upload flow, the presigner
 ```
 
 The texts live in [tools/rizotto/skills/](tools/rizotto/skills/) and are embedded in

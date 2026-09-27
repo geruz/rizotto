@@ -1,0 +1,279 @@
+// Package storage signs the links a caller uses to talk to the object storage
+// directly. The bytes of a file never pass through this service: it only says
+// where they may be put and for how long.
+//
+// Only query signing (AWS Signature Version 4) is implemented, because that is
+// all a presigned link needs — and a presigned link is enough for every request
+// this service makes itself, HEAD and DELETE included.
+package storage
+
+import (
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"net/http"
+	"net/url"
+	"sort"
+	"strconv"
+	"strings"
+	"time"
+
+	"{{.RizottoModule}}/settings/env"
+)
+
+const (
+	algorithm       = "AWS4-HMAC-SHA256"
+	service         = "s3"
+	terminator      = "aws4_request"
+	unsignedPayload = "UNSIGNED-PAYLOAD"
+
+	amzDateFormat = "20060102T150405Z"
+	dateFormat    = "20060102"
+
+	// requestTimeout bounds the two calls the service makes itself.
+	requestTimeout = 15 * time.Second
+
+	defaultLinkTTLMinutes = 15
+)
+
+var (
+	ErrObjectMissing = errors.New("the object is not in the storage")
+	ErrStorageRefused = errors.New("the storage refused the request")
+)
+
+// Storage is one bucket and the credentials reaching it.
+type Storage struct {
+	endpoint  *url.URL
+	region    string
+	bucket    string
+	accessKey string
+	secretKey string
+	pathStyle bool
+	ttl       time.Duration
+	// now is the clock, replaced in the tests so a signature is reproducible.
+	now func() time.Time
+}
+
+// MustLoad reads the configuration and panics when it is incomplete, so a
+// misconfigured deployment fails at startup rather than at the first upload.
+func MustLoad() Storage {
+	endpoint, err := url.Parse(env.MustGetStringValue("S3_ENDPOINT"))
+	if err != nil {
+		panic("S3_ENDPOINT is not a url: " + err.Error())
+	}
+
+	minutes := env.GetIntValue("S3_LINK_TTL_MINUTES", defaultLinkTTLMinutes)
+
+	return Storage{
+		endpoint:  endpoint,
+		region:    env.MustGetStringValue("S3_REGION"),
+		bucket:    env.MustGetStringValue("S3_BUCKET"),
+		accessKey: env.MustGetStringValue("S3_ACCESS_KEY_ID"),
+		secretKey: env.MustGetStringValue("S3_SECRET_ACCESS_KEY"),
+		pathStyle: env.GetBoolValue("S3_PATH_STYLE", true),
+		ttl:       time.Duration(minutes) * time.Minute,
+		now:       time.Now,
+	}
+}
+
+// TTL is how long the links it signs stay valid.
+func (s Storage) TTL() time.Duration {
+	return s.ttl
+}
+
+// UploadLink is where the caller may PUT the bytes of an object.
+func (s Storage) UploadLink(key string) (string, error) {
+	return s.presign(http.MethodPut, key)
+}
+
+// DownloadLink is where the caller may GET them back.
+func (s Storage) DownloadLink(key string) (string, error) {
+	return s.presign(http.MethodGet, key)
+}
+
+// Size answers how many bytes the object holds, and ErrObjectMissing when the
+// upload never happened. It is a plain HEAD on a presigned link, so it needs no
+// signing of its own.
+func (s Storage) Size(key string) (int64, error) {
+	link, err := s.presign(http.MethodHead, key)
+	if err != nil {
+		return 0, err
+	}
+
+	response, err := s.send(http.MethodHead, link)
+	if err != nil {
+		return 0, err
+	}
+
+	defer func() { _ = response.Body.Close() }()
+
+	if response.StatusCode == http.StatusNotFound {
+		return 0, ErrObjectMissing
+	}
+
+	if response.StatusCode != http.StatusOK {
+		return 0, fmt.Errorf("%w: HEAD answered %d", ErrStorageRefused, response.StatusCode)
+	}
+
+	return response.ContentLength, nil
+}
+
+// Delete removes the object. An object that is not there is not an error: the
+// caller wanted it gone, and it is.
+func (s Storage) Delete(key string) error {
+	link, err := s.presign(http.MethodDelete, key)
+	if err != nil {
+		return err
+	}
+
+	response, err := s.send(http.MethodDelete, link)
+	if err != nil {
+		return err
+	}
+
+	defer func() { _ = response.Body.Close() }()
+
+	switch response.StatusCode {
+	case http.StatusNoContent, http.StatusOK, http.StatusNotFound:
+		return nil
+	default:
+		return fmt.Errorf("%w: DELETE answered %d", ErrStorageRefused, response.StatusCode)
+	}
+}
+
+func (s Storage) send(method, link string) (*http.Response, error) {
+	request, err := http.NewRequest(method, link, nil) //nolint:noctx // the timeout below bounds it
+	if err != nil {
+		return nil, fmt.Errorf("build the %s request: %w", method, err)
+	}
+
+	client := &http.Client{Timeout: requestTimeout} //nolint:exhaustruct_v5 // the rest are stdlib defaults
+
+	response, err := client.Do(request)
+	if err != nil {
+		return nil, fmt.Errorf("call the storage: %w", err)
+	}
+
+	return response, nil
+}
+
+// presign builds the link and signs it with Signature Version 4. Everything the
+// signature covers is in the URL, so no header has to travel with the request
+// beyond Host.
+func (s Storage) presign(method, key string) (string, error) {
+	if key == "" {
+		return "", ErrEmptyKey
+	}
+
+	host, path := s.hostAndPath(key)
+	now := s.now().UTC()
+	date := now.Format(dateFormat)
+	scope := strings.Join([]string{date, s.region, service, terminator}, "/")
+
+	query := url.Values{}
+	query.Set("X-Amz-Algorithm", algorithm)
+	query.Set("X-Amz-Credential", s.accessKey+"/"+scope)
+	query.Set("X-Amz-Date", now.Format(amzDateFormat))
+	query.Set("X-Amz-Expires", strconv.Itoa(int(s.ttl.Seconds())))
+	query.Set("X-Amz-SignedHeaders", "host")
+
+	canonical := strings.Join([]string{
+		method,
+		path,
+		canonicalQuery(query),
+		"host:" + host + "\n",
+		"host",
+		unsignedPayload,
+	}, "\n")
+
+	toSign := strings.Join([]string{
+		algorithm,
+		now.Format(amzDateFormat),
+		scope,
+		sha256Hex(canonical),
+	}, "\n")
+
+	signature := hex.EncodeToString(hmacSHA256(s.signingKey(date), toSign))
+
+	return s.endpoint.Scheme + "://" + host + path + "?" + canonicalQuery(query) +
+		"&X-Amz-Signature=" + signature, nil
+}
+
+var ErrEmptyKey = errors.New("the object key is empty")
+
+// hostAndPath places the bucket where the storage expects it: in the path for
+// MinIO and anything else addressed that way, in the host name for AWS.
+func (s Storage) hostAndPath(key string) (string, string) {
+	if s.pathStyle {
+		return s.endpoint.Host, "/" + uriEncode(s.bucket, true) + "/" + uriEncode(key, false)
+	}
+
+	return s.bucket + "." + s.endpoint.Host, "/" + uriEncode(key, false)
+}
+
+// signingKey derives the key of the day, as Signature Version 4 prescribes.
+func (s Storage) signingKey(date string) []byte {
+	key := hmacSHA256([]byte("AWS4"+s.secretKey), date)
+	key = hmacSHA256(key, s.region)
+	key = hmacSHA256(key, service)
+
+	return hmacSHA256(key, terminator)
+}
+
+func hmacSHA256(key []byte, value string) []byte {
+	mac := hmac.New(sha256.New, key)
+	_, _ = mac.Write([]byte(value))
+
+	return mac.Sum(nil)
+}
+
+func sha256Hex(value string) string {
+	digest := sha256.Sum256([]byte(value))
+
+	return hex.EncodeToString(digest[:])
+}
+
+// canonicalQuery encodes the query the way the signature expects: keys sorted,
+// every character escaped by the rules below. url.Values.Encode cannot be used,
+// because it writes a space as "+".
+func canonicalQuery(query url.Values) string {
+	keys := make([]string, 0, len(query))
+	for key := range query {
+		keys = append(keys, key)
+	}
+
+	sort.Strings(keys)
+
+	pairs := make([]string, 0, len(keys))
+	for _, key := range keys {
+		pairs = append(pairs, uriEncode(key, true)+"="+uriEncode(query.Get(key), true))
+	}
+
+	return strings.Join(pairs, "&")
+}
+
+// uriEncode is the escaping Signature Version 4 defines: every character outside
+// the unreserved set becomes a percent escape, and a slash survives inside a path.
+func uriEncode(value string, encodeSlash bool) string {
+	var out strings.Builder
+
+	for index := range len(value) {
+		char := value[index]
+
+		switch {
+		case char >= 'A' && char <= 'Z',
+			char >= 'a' && char <= 'z',
+			char >= '0' && char <= '9',
+			char == '-', char == '_', char == '.', char == '~':
+			out.WriteByte(char)
+		case char == '/' && !encodeSlash:
+			out.WriteByte(char)
+		default:
+			_, _ = fmt.Fprintf(&out, "%%%02X", char)
+		}
+	}
+
+	return out.String()
+}

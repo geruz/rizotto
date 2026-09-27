@@ -1,0 +1,241 @@
+package storage
+
+import (
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"strings"
+	"testing"
+	"time"
+)
+
+// fixed is the clock the signatures below are reproducible with.
+func fixed() time.Time {
+	return time.Date(2026, time.March, 4, 12, 0, 0, 0, time.UTC)
+}
+
+func testStorage(t *testing.T, endpoint string, pathStyle bool) Storage {
+	t.Helper()
+
+	parsed, err := url.Parse(endpoint)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	return Storage{
+		endpoint:  parsed,
+		region:    "eu-central-1",
+		bucket:    "a-bucket",
+		accessKey: "AKIAEXAMPLE",
+		secretKey: "a-secret",
+		pathStyle: pathStyle,
+		ttl:       15 * time.Minute,
+		now:       fixed,
+	}
+}
+
+func TestUploadLinkCarriesTheSignature(t *testing.T) {
+	t.Parallel()
+
+	link, err := testStorage(t, "https://storage.example.com", true).UploadLink("7/abc.png")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	parsed, err := url.Parse(link)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if parsed.Path != "/a-bucket/7/abc.png" {
+		t.Fatalf("the bucket must be in the path, got %q", parsed.Path)
+	}
+
+	query := parsed.Query()
+	for _, key := range []string{"X-Amz-Algorithm", "X-Amz-Credential", "X-Amz-Date", "X-Amz-Expires", "X-Amz-Signature"} {
+		if query.Get(key) == "" {
+			t.Fatalf("%s is missing from %q", key, link)
+		}
+	}
+
+	if query.Get("X-Amz-Credential") != "AKIAEXAMPLE/20260304/eu-central-1/s3/aws4_request" {
+		t.Fatalf("wrong credential scope: %q", query.Get("X-Amz-Credential"))
+	}
+
+	if query.Get("X-Amz-Expires") != "900" {
+		t.Fatalf("wrong expiry: %q", query.Get("X-Amz-Expires"))
+	}
+}
+
+// TestSignatureCoversTheMethod pins that a link signed for one verb cannot be used
+// with another: this is what keeps a download link from becoming an upload link.
+func TestSignatureCoversTheMethod(t *testing.T) {
+	t.Parallel()
+
+	store := testStorage(t, "https://storage.example.com", true)
+
+	upload, err := store.UploadLink("7/abc.png")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	download, err := store.DownloadLink("7/abc.png")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if signatureOf(t, upload) == signatureOf(t, download) {
+		t.Fatal("PUT and GET must not share a signature")
+	}
+}
+
+// TestSignatureCoversTheKey pins that a link for one object is no good for another.
+func TestSignatureCoversTheKey(t *testing.T) {
+	t.Parallel()
+
+	store := testStorage(t, "https://storage.example.com", true)
+
+	mine, err := store.DownloadLink("7/mine.png")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	theirs, err := store.DownloadLink("8/theirs.png")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if signatureOf(t, mine) == signatureOf(t, theirs) {
+		t.Fatal("two objects must not share a signature")
+	}
+}
+
+func TestSignatureIsReproducible(t *testing.T) {
+	t.Parallel()
+
+	first, err := testStorage(t, "https://storage.example.com", true).DownloadLink("7/abc.png")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	second, err := testStorage(t, "https://storage.example.com", true).DownloadLink("7/abc.png")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if first != second {
+		t.Fatal("the same request at the same instant must sign the same")
+	}
+}
+
+func TestVirtualHostedStyle(t *testing.T) {
+	t.Parallel()
+
+	link, err := testStorage(t, "https://s3.eu-central-1.amazonaws.com", false).DownloadLink("7/abc.png")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	parsed, err := url.Parse(link)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if parsed.Host != "a-bucket.s3.eu-central-1.amazonaws.com" {
+		t.Fatalf("the bucket must be in the host, got %q", parsed.Host)
+	}
+
+	if parsed.Path != "/7/abc.png" {
+		t.Fatalf("the path must hold the key alone, got %q", parsed.Path)
+	}
+}
+
+func TestSizeAndDeleteTalkToTheStorage(t *testing.T) {
+	t.Parallel()
+
+	var seen []string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen = append(seen, r.Method)
+
+		if r.Method == http.MethodHead {
+			w.Header().Set("Content-Length", "1234")
+			w.WriteHeader(http.StatusOK)
+
+			return
+		}
+
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	store := testStorage(t, server.URL, true)
+
+	size, err := store.Size("7/abc.png")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if size != 1234 {
+		t.Fatalf("wrong size: %d", size)
+	}
+
+	if err := store.Delete("7/abc.png"); err != nil {
+		t.Fatal(err)
+	}
+
+	if strings.Join(seen, ",") != "HEAD,DELETE" {
+		t.Fatalf("unexpected calls: %v", seen)
+	}
+}
+
+// TestSizeReportsAMissingObject pins that an upload that never happened is told
+// apart from one that did, so a file is not marked ready by mistake.
+func TestSizeReportsAMissingObject(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer server.Close()
+
+	_, err := testStorage(t, server.URL, true).Size("7/abc.png")
+	if !errors.Is(err, ErrObjectMissing) {
+		t.Fatalf("expected ErrObjectMissing, got %v", err)
+	}
+}
+
+func TestUriEncode(t *testing.T) {
+	t.Parallel()
+
+	cases := map[string]string{
+		"plain":       "plain",
+		"a b":         "a%20b",
+		"a/b":         "a/b",
+		"~-_.":        "~-_.",
+		"a+b":         "a%2Bb",
+		"é":      "%C3%A9",
+	}
+
+	for input, expected := range cases {
+		if got := uriEncode(input, false); got != expected {
+			t.Fatalf("uriEncode(%q) = %q, want %q", input, got, expected)
+		}
+	}
+
+	if got := uriEncode("a/b", true); got != "a%2Fb" {
+		t.Fatalf("a slash must be escaped when asked: %q", got)
+	}
+}
+
+func signatureOf(t *testing.T, link string) string {
+	t.Helper()
+
+	parsed, err := url.Parse(link)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	return parsed.Query().Get("X-Amz-Signature")
+}

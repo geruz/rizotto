@@ -244,11 +244,11 @@ func (u userSpec) steps() []string {
      api/controller.go keeps its placeholder for the rest.`
 
 	return []string{
-		"add the variables above to .env.example",
+		stepEnvExample,
 		register,
 		routes,
 		area,
-		"task gen        # regenerates bind-gen.go from the contract and runs sqlc",
+		stepGen,
 		"task migrate-up # applies the tables of the solution",
 		"task test       # runs the route tests and writes api/user-api/openapi.yml",
 	}

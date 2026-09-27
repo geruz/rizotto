@@ -1,6 +1,6 @@
 ---
 name: rizotto
-description: Scaffold and extend projects built with the rizotto framework — creating a project, adding services, adding HTTP controllers, installing whole features such as authentication, and understanding how its layers fit together. Use whenever the user works in a rizotto project, mentions the rizotto CLI, or asks to add a service, controller, CRUD layer, or login/users/OAuth to one.
+description: Scaffold and extend projects built with the rizotto framework — creating a project, adding services, adding HTTP controllers, installing whole features such as authentication or file storage, and understanding how its layers fit together. Use whenever the user works in a rizotto project, mentions the rizotto CLI, or asks to add a service, controller, CRUD layer, login/users/OAuth, or file uploads/S3 to one.
 allowed-tools: Bash(rizotto:*)
 ---
 
@@ -43,9 +43,10 @@ rizotto solution list            # what can be installed whole
 rizotto solution skill <name>    # what that one does
 ```
 
-Authentication is the clearest case: if the user asks for login, users, sessions
-or OAuth, do not assemble it out of `service add` and `controller add` — install
-the solution and report what it printed.
+Authentication and file storage are the clearest cases: if the user asks for
+login, users, sessions, OAuth, uploads or S3, do not assemble it out of
+`service add` and `controller add` — install the solution and report what it
+printed.
 
 A solution may be built on another one and installs it first. The flags reach only
 the solution you named, so a dependency takes its defaults: when the user cares

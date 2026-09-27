@@ -43,6 +43,7 @@ type solution interface {
 const (
 	userSolutionName  = "user"
 	oauthSolutionName = "oauth"
+	filesSolutionName = "files"
 )
 
 // solutions is the registry. Adding a solution means adding a file next to this
@@ -52,6 +53,7 @@ const (
 var solutions = []solution{
 	userSolution{},
 	oauthSolution{},
+	filesSolution{},
 }
 
 // solutionPlan describes an installation instead of performing it, so that every
@@ -73,6 +75,12 @@ type solutionPlan struct {
 	// Steps are the wiring lines the author has to apply by hand.
 	Steps []string
 }
+
+// The steps every solution ends with, in the order they have to be applied.
+const (
+	stepEnvExample = "add the variables above to .env.example"
+	stepGen        = "task gen        # regenerates bind-gen.go from the contract and runs sqlc"
+)
 
 // envVar is one configuration value a solution reads at startup.
 type envVar struct {

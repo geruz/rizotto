@@ -360,11 +360,11 @@ func (o oauthSpec) steps() []string {
          <OAUTH_REDIRECT_BASE_URL>/api/v1/auth/<provider>/callback`
 
 	return []string{
-		"add the variables above to .env.example",
+		stepEnvExample,
 		register,
 		routes,
 		redirect,
-		"task gen        # regenerates bind-gen.go from the contract and runs sqlc",
+		stepGen,
 		"task migrate-up # applies the table of the solution",
 		"task test       # runs the route tests and writes api/oauth-api/openapi.yml",
 	}

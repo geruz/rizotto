@@ -1,0 +1,97 @@
+// Package file is the contract of the File service: the files of the project and
+// the links reaching their bytes in the object storage.
+package file
+
+import (
+	"context"
+	"time"
+
+	"{{.RizottoModule}}/bb"
+)
+
+// The states a file goes through. It becomes ready once the bytes are in the
+// storage, which is what tells a finished upload from an abandoned one.
+const (
+	StatusPending = "pending"
+	StatusReady   = "ready"
+)
+
+// The answers a caller can act on, as opposed to the ones only we can fix. They
+// live in the contract because both the service and the controller name them.
+const (
+	ErrorCodeTooLarge    = "file_too_large"
+	ErrorCodeNotUploaded = "file_not_uploaded"
+)
+
+type File struct {
+	ID          int    `json:"id"`
+	Name        string `json:"name"`
+	ContentType string `json:"contentType"`
+	Size        int64  `json:"size"`
+	Status      string `json:"status"`
+}
+
+// Upload is a file that has no bytes yet, and where to send them.
+type Upload struct {
+	File      File
+	UploadURL string
+	ExpiresAt time.Time
+}
+
+// Link is where the bytes of a file may be read, for a while.
+type Link struct {
+	URL       string
+	ExpiresAt time.Time
+}
+
+// UserID travels with every request: a file belongs to somebody, and the service
+// answers nothing about a file of somebody else.
+type CreateFileRequest struct {
+	UserID      int
+	Name        string
+	ContentType string
+	Size        int64
+}
+
+type ConfirmFileRequest struct {
+	UserID int
+	FileID int
+}
+
+type GetFileRequest struct {
+	UserID int
+	FileID int
+}
+
+type GetFileLinkRequest struct {
+	UserID int
+	FileID int
+}
+
+type SelectFilesRequest struct {
+	UserID int
+	Offset int
+	Limit  int
+}
+
+type FileList struct {
+	Offset int
+	Limit  int
+	Files  []File
+}
+
+type DeleteFileRequest struct {
+	UserID int
+	FileID int
+}
+
+type DeletedFile struct {
+	FileID int
+}
+
+//go:generate genbind -client FileClient
+type FileClient interface {
+{{- range .Methods}}
+	// bind-method: {{.Address}}
+	{{.Name}}(ctx context.Context, req {{.Request}}) ({{.Response}}, bb.ServiceError)
+{{end}}}

@@ -1,0 +1,321 @@
+package fileapi
+
+import (
+	"context"
+{{if .Redirect}}	"net/http"
+{{end}}	"os"
+	"testing"
+	"time"
+
+	"{{.RizottoModule}}/bb"
+	"{{.RizottoModule}}/documentation/openapi"
+	"{{.RizottoModule}}/gateway"
+	"{{.RizottoModule}}/testutils/api"
+	"{{.RizottoModule}}/testutils/mock"
+
+	appapi "{{.APIImport}}"
+	"{{.Module}}/api/doc"
+	file "{{.ClientImport}}"
+	user "{{.Module}}/services/user/user-client"
+)
+
+const (
+	testEmail     = "person@example.com"
+	testName      = "A Person"
+	testSession   = "a-valid-session-token"
+	testUserID    = 1
+	testFileID    = 7
+	testFileName  = "a-report.pdf"
+	testMediaType = "application/pdf"
+	testSize      = 2048
+	testUploadURL = "https://storage.example.com/a-bucket/1/abc.pdf?X-Amz-Signature=put"
+	testLinkURL   = "https://storage.example.com/a-bucket/1/abc.pdf?X-Amz-Signature=get"
+)
+
+// TestMain registers a stub user service, so the area function guarding every
+// route here works without a database.
+func TestMain(m *testing.M) {
+	if err := os.Setenv("APP_LOGIN_REDIRECT_URL", "http://localhost:3000"); err != nil {
+		panic(err)
+	}
+
+	user.RegisterServer(stubUserService{})
+
+	os.Exit(m.Run())
+}
+
+type stubUserService struct{}
+
+func (stubUserService) GetUserRPC(_ context.Context, req user.GetUserRequest) (user.User, bb.ServiceError) {
+	return user.User{ID: req.UserID, Email: testEmail, Name: testName}, nil
+}
+
+func (stubUserService) CreateUserRPC(_ context.Context, req user.CreateUserRequest) (user.User, bb.ServiceError) {
+	return user.User{ID: testUserID, Email: req.Email, Name: req.Name}, nil
+}
+
+func (stubUserService) CreateSessionRPC(
+	_ context.Context, req user.CreateSessionRequest,
+) (user.Session, bb.ServiceError) {
+	return user.Session{
+		Token:     testSession,
+		ExpiresAt: time.Now().UTC().Add(time.Hour),
+		User:      user.User{ID: req.UserID, Email: testEmail, Name: testName},
+	}, nil
+}
+
+func (stubUserService) GetSessionRPC(
+	_ context.Context, req user.GetSessionRequest,
+) (user.Session, bb.ServiceError) {
+	if req.Token != testSession {
+		return user.Session{}, bb.NewUnauthorizedError("unknown session")
+	}
+
+	return user.Session{
+		Token:     "",
+		ExpiresAt: time.Now().UTC().Add(time.Hour),
+		User:      user.User{ID: testUserID, Email: testEmail, Name: testName},
+	}, nil
+}
+
+func (stubUserService) DeleteSessionRPC(
+	_ context.Context, _ user.DeleteSessionRequest,
+) (user.DeletedSession, bb.ServiceError) {
+	return user.DeletedSession{Deleted: true}, nil
+}
+
+// authenticate makes the request carry the session the stub service accepts. How
+// a session travels is the business of the user solution, so it says how.
+func authenticate(cfg api.RequestConfiguration) api.RequestConfiguration {
+	return cfg.WithRequest(appapi.SessionRequest(testSession))
+}
+
+func pendingFile() file.File {
+	return file.File{
+		ID:          testFileID,
+		Name:        testFileName,
+		ContentType: testMediaType,
+		Size:        testSize,
+		Status:      file.StatusPending,
+	}
+}
+
+func readyFile() file.File {
+	ready := pendingFile()
+	ready.Status = file.StatusReady
+
+	return ready
+}
+
+func Test_CreateFileRoute(t *testing.T) {
+	t.Parallel()
+
+	api.GroupRouteTests(t, "POST /api/v1/files", NewFileController).
+		Documentation(
+			doc.ApiPublicDocumentationV1,
+			openapi.Description("Announces a file and answers the link to upload it with."),
+		).
+		Case("announced", testCreateFileCase).
+		Case("without a session", testCreateFileUnauthenticatedCase)
+}
+
+func testCreateFileCase(t *testing.T, ctr FileController, cfg api.RequestConfiguration) {
+	t.Helper()
+	// arrange
+	expires := time.Now().UTC().Add(time.Minute).Truncate(time.Second)
+	mock.RPC(&ctr.createFileRPC).Success(file.Upload{
+		File:      pendingFile(),
+		UploadURL: testUploadURL,
+		ExpiresAt: expires,
+	})
+
+	body := CreateFileRequest{Name: testFileName, ContentType: testMediaType, Size: testSize}
+
+	// act
+	api.TestAPICall(t, ctr, ctr.createFile, authenticate(cfg).WithJSONBody(body)).
+		AddInDocumentation(t, "OK").
+		ExpectedRequest(t, body).
+		ExpectedResponse(t, Upload{
+			File:      File{ID: testFileID, Name: testFileName, ContentType: testMediaType, Size: testSize, Status: file.StatusPending},
+			UploadURL: testUploadURL,
+			ExpiresAt: expires,
+		})
+}
+
+// testCreateFileUnauthenticatedCase pins that the files of a project are not
+// public: the handler is never reached without a session.
+func testCreateFileUnauthenticatedCase(t *testing.T, ctr FileController, cfg api.RequestConfiguration) {
+	t.Helper()
+
+	// act
+	api.TestAPICall(t, ctr, ctr.createFile, cfg.
+		WithJSONBody(CreateFileRequest{Name: testFileName, ContentType: testMediaType, Size: testSize})).
+		ExpectedError(t, gateway.NewUnauthorizedError("Authentication required"))
+}
+
+func Test_ConfirmFileRoute(t *testing.T) {
+	t.Parallel()
+
+	api.GroupRouteTests(t, "POST /api/v1/files/{{"{"}}file_id}/confirm", NewFileController).
+		Documentation(
+			doc.ApiPublicDocumentationV1,
+			openapi.Description("Checks the bytes arrived and makes the file usable."),
+		).
+		Case("confirmed", testConfirmFileCase).
+		Case("nothing was uploaded", testConfirmFileNotUploadedCase)
+}
+
+func testConfirmFileCase(t *testing.T, ctr FileController, cfg api.RequestConfiguration) {
+	t.Helper()
+	// arrange
+	mock.RPC(&ctr.confirmFileRPC).Success(readyFile())
+
+	// act
+	api.TestAPICall(t, ctr, ctr.confirmFile, authenticate(cfg).WithPathVar("file_id", "7")).
+		AddInDocumentation(t, "OK").
+		ExpectedRequest(t, FileRequest{FileID: testFileID}).
+		ExpectedResponse(t, File{
+			ID: testFileID, Name: testFileName, ContentType: testMediaType, Size: testSize, Status: file.StatusReady,
+		})
+}
+
+// testConfirmFileNotUploadedCase pins that confirming a file whose bytes never
+// arrived is refused, rather than marking it usable.
+func testConfirmFileNotUploadedCase(t *testing.T, ctr FileController, cfg api.RequestConfiguration) {
+	t.Helper()
+	// arrange
+	mock.RPC(&ctr.confirmFileRPC).Error(
+		bb.NewValidationError(file.ErrorCodeNotUploaded, "the bytes are not in the storage"))
+
+	// act
+	api.TestAPICall(t, ctr, ctr.confirmFile, authenticate(cfg).WithPathVar("file_id", "7")).
+		AddInDocumentation(t, "The upload never happened").
+		ExpectedError(t, notUploaded)
+}
+
+func Test_GetFileRoute(t *testing.T) {
+	t.Parallel()
+
+	api.GroupRouteTests(t, "GET /api/v1/files/{{"{"}}file_id}", NewFileController).
+		Documentation(
+			doc.ApiPublicDocumentationV1,
+			openapi.Description("Returns the metadata of one file of the caller."),
+		).
+		Case("existing file", testGetFileCase).
+		Case("file of somebody else", testGetFileNotFoundCase)
+}
+
+func testGetFileCase(t *testing.T, ctr FileController, cfg api.RequestConfiguration) {
+	t.Helper()
+	// arrange
+	mock.RPC(&ctr.getFileRPC).Success(readyFile())
+
+	// act
+	api.TestAPICall(t, ctr, ctr.getFile, authenticate(cfg).WithPathVar("file_id", "7")).
+		AddInDocumentation(t, "OK").
+		ExpectedRequest(t, FileRequest{FileID: testFileID}).
+		ExpectedResponse(t, File{
+			ID: testFileID, Name: testFileName, ContentType: testMediaType, Size: testSize, Status: file.StatusReady,
+		})
+}
+
+// testGetFileNotFoundCase pins that a file of another owner reads as missing: the
+// answer must not confirm that it exists.
+func testGetFileNotFoundCase(t *testing.T, ctr FileController, cfg api.RequestConfiguration) {
+	t.Helper()
+	// arrange
+	mock.RPC(&ctr.getFileRPC).Error(bb.NewNotFoundError("file not found"))
+
+	// act
+	api.TestAPICall(t, ctr, ctr.getFile, authenticate(cfg).WithPathVar("file_id", "99")).
+		AddInDocumentation(t, "A file that is not yours").
+		ExpectedError(t, fileNotFound)
+}
+
+func Test_ListFilesRoute(t *testing.T) {
+	t.Parallel()
+
+	api.GroupRouteTests(t, "GET /api/v1/files", NewFileController).
+		Documentation(
+			doc.ApiPublicDocumentationV1,
+			openapi.Description("Returns a page of the files of the caller."),
+		).
+		Case("file list", testListFilesCase)
+}
+
+func testListFilesCase(t *testing.T, ctr FileController, cfg api.RequestConfiguration) {
+	t.Helper()
+	// arrange
+	mock.RPC(&ctr.selectFilesRPC).Success(file.FileList{
+		Offset: 0,
+		Limit:  10,
+		Files:  []file.File{readyFile()},
+	})
+
+	// act
+	api.TestAPICall(t, ctr, ctr.listFiles, authenticate(cfg).WithQuery("limit=10&offset=0")).
+		AddInDocumentation(t, "OK").
+		ExpectedRequest(t, FileListRequest{Offset: 0, Limit: 10}).
+		ExpectedResponse(t, FileList{
+			Offset: 0,
+			Limit:  10,
+			Files: []File{
+				{
+					ID: testFileID, Name: testFileName, ContentType: testMediaType,
+					Size: testSize, Status: file.StatusReady,
+				},
+			},
+		})
+}
+
+func Test_FileContentRoute(t *testing.T) {
+	t.Parallel()
+
+	api.GroupRouteTests(t, "GET /api/v1/files/{{"{"}}file_id}/content", NewFileController).
+		Documentation(
+			doc.ApiPublicDocumentationV1,
+			openapi.Description("Hands over where the bytes of the file may be read."),
+		).
+		Case("ready file", testFileContentCase)
+}
+
+func testFileContentCase(t *testing.T, ctr FileController, cfg api.RequestConfiguration) {
+	t.Helper()
+	// arrange
+	expires := time.Now().UTC().Add(time.Minute).Truncate(time.Second)
+	mock.RPC(&ctr.getFileLinkRPC).Success(file.Link{URL: testLinkURL, ExpiresAt: expires})
+
+	// act
+	call := api.TestAPICall(t, ctr, ctr.fileContent, authenticate(cfg).WithPathVar("file_id", "7")).
+		ExpectedRequest(t, FileRequest{FileID: testFileID})
+{{if .Redirect}}
+	// assert: the caller is sent to the storage, which serves the bytes
+	call.ExpectedRedirect(t, http.StatusFound, testLinkURL)
+{{else}}
+	// assert: the link travels in the answer
+	call.AddInDocumentation(t, "OK").
+		ExpectedResponse(t, Download{URL: testLinkURL, ExpiresAt: expires})
+{{end}}}
+
+func Test_DeleteFileRoute(t *testing.T) {
+	t.Parallel()
+
+	api.GroupRouteTests(t, "DELETE /api/v1/files/{{"{"}}file_id}", NewFileController).
+		Documentation(
+			doc.ApiPublicDocumentationV1,
+			openapi.Description("Deletes the file and its bytes."),
+		).
+		Case("deleted", testDeleteFileCase)
+}
+
+func testDeleteFileCase(t *testing.T, ctr FileController, cfg api.RequestConfiguration) {
+	t.Helper()
+	// arrange
+	mock.RPC(&ctr.deleteFileRPC).Success(file.DeletedFile{FileID: testFileID})
+
+	// act
+	api.TestAPICall(t, ctr, ctr.deleteFile, authenticate(cfg).WithPathVar("file_id", "7")).
+		AddInDocumentation(t, "OK").
+		ExpectedRequest(t, FileRequest{FileID: testFileID}).
+		ExpectedResponse(t, DeletedFile{ID: testFileID})
+}

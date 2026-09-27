@@ -23,6 +23,9 @@ type (
 		payload     any
 	}
 	QueryParams string
+	// RequestFunc is the escape hatch for whatever the configurators above do not
+	// cover, and the seam a package uses to apply its own convention to a request.
+	RequestFunc func(*http.Request) error
 	Header      struct {
 		key   string
 		value string
@@ -63,6 +66,10 @@ func (b Body) apply(req *http.Request) error {
 	req.Header.Set("Content-Type", b.contentType)
 
 	return nil
+}
+
+func (f RequestFunc) apply(req *http.Request) error {
+	return f(req)
 }
 
 func (h Header) apply(req *http.Request) error {
@@ -152,6 +159,15 @@ func (h RequestConfiguration) WithHeader(key, value string) RequestConfiguration
 // WithBearer authenticates the request with a bearer token.
 func (h RequestConfiguration) WithBearer(token string) RequestConfiguration {
 	return h.WithHeader("Authorization", "Bearer "+token)
+}
+
+// WithRequest applies anything the configurators above do not cover. It is what a
+// package exports when it owns a convention other packages have to follow, such as
+// how a session travels.
+func (h RequestConfiguration) WithRequest(apply func(*http.Request) error) RequestConfiguration {
+	h.configurations = append(h.configurations, RequestFunc(apply))
+
+	return h
 }
 
 // WithCookie sends one cookie with the request, which is how a session reaches an

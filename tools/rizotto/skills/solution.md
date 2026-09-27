@@ -46,6 +46,7 @@ dependency by name first:
 
     rizotto solution add user -session bearer
     rizotto solution add oauth -providers github
+    rizotto solution add files -download url
 
 Circular requirements are an error rather than a hang, and a solution requiring a
 name that is not in the registry fails before anything is written.
@@ -125,7 +126,9 @@ Two rules keep dependent solutions from growing into each other:
 - **Talk through the contract, not the files.** The services of a solution stay
   independent; a controller orchestrates them. Where a decision belongs to the
   other solution, it exports a function for it: `api.HandOverSession` is how
-  `oauth` hands out a session without knowing how sessions travel.
+  `oauth` hands out a session without knowing how sessions travel, and
+  `api.SessionRequest` is how the route tests of `files` authenticate without
+  knowing either.
 
 Finally, add the solution to the `solutions` registry, write its
 `skills/<name>.md`, and mention it in the `SKILL.md` template so that the agents

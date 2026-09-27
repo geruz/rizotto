@@ -1,0 +1,19 @@
+-- object_key is where the bytes live in the bucket. It is generated here and
+-- never built out of the name the caller sent, so a name cannot reach out of the
+-- prefix of its owner or collide with somebody else's file.
+--
+-- user_id has no foreign key on purpose: the users belong to the user service,
+-- which owns its own tables and its own migrations.
+CREATE TABLE public.files (
+    id BIGSERIAL PRIMARY KEY,
+    user_id BIGINT NOT NULL,
+    object_key VARCHAR(512) NOT NULL UNIQUE,
+    name VARCHAR(255) NOT NULL,
+    content_type VARCHAR(255) NOT NULL,
+    size_bytes BIGINT NOT NULL DEFAULT 0,
+    status VARCHAR(16) NOT NULL DEFAULT 'pending',
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX files_user_id_created_at_id_idx ON public.files (user_id, created_at DESC, id DESC);

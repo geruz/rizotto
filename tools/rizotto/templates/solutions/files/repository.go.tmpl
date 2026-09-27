@@ -1,0 +1,57 @@
+// Package repository is the only place that talks to the database of the File service.
+package repository
+
+import (
+	"context"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"{{.RizottoModule}}/pg"
+
+	"{{.Module}}/{{.Dir}}/repository/db"
+)
+
+type FileRepository struct {
+	pg.Repository
+
+	queries *db.Queries
+}
+
+func NewFileRepository(pool *pgxpool.Pool) FileRepository {
+	return FileRepository{
+		Repository: pg.NewRepository(pool),
+		queries:    db.New(pool),
+	}
+}
+
+func (r FileRepository) CreateFile(
+	ctx context.Context, userID int64, objectKey, name, contentType string, size int64,
+) (db.File, error) {
+	return r.queries.CreateFile(ctx, db.CreateFileParams{
+		UserID:      userID,
+		ObjectKey:   objectKey,
+		Name:        name,
+		ContentType: contentType,
+		SizeBytes:   size,
+	})
+}
+
+func (r FileRepository) GetFile(ctx context.Context, id, userID int64) (db.File, error) {
+	return r.queries.GetFile(ctx, db.GetFileParams{ID: id, UserID: userID})
+}
+
+func (r FileRepository) SelectFiles(ctx context.Context, userID, limit, offset int64) ([]db.File, error) {
+	return r.queries.SelectFiles(ctx, db.SelectFilesParams{
+		UserID: userID,
+		Limit:  limit,
+		Offset: offset,
+	})
+}
+
+func (r FileRepository) MarkFileReady(ctx context.Context, id, userID, size int64) (db.File, error) {
+	return r.queries.MarkFileReady(ctx, db.MarkFileReadyParams{ID: id, UserID: userID, SizeBytes: size})
+}
+
+func (r FileRepository) DeleteFile(ctx context.Context, id, userID int64) (db.File, error) {
+	return r.queries.DeleteFile(ctx, db.DeleteFileParams{ID: id, UserID: userID})
+}
